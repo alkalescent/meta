@@ -1,5 +1,5 @@
 *.txt
-src/silicon/_version.py
+src/meta_one/_version.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

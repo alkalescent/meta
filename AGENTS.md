@@ -2,16 +2,16 @@
 
 ## Overview
 
-This repo is a Python CLI hello world template (`silicon/`) — a minimal example for building command-line tools with typer, including test setup, CI, and Nuitka binary builds.
+This repo is a Python CLI project intelligence tool (`meta`) that surfaces codebase structure, dependencies, scripts, env vars, contributors, and health. Built with Typer, packaged as `meta.one` on PyPI.
 
 ## CI Checks
 
-All changes must pass these checks before merging (runs on ubuntu, macOS, and Windows):
+All changes must pass before merging (ubuntu, macOS, Windows):
 
 ```bash
 make lint      # ruff check . && ruff format --check .
 make type      # ty check src tests
-make cov       # pytest with coverage (threshold enforced)
+make cov       # pytest with coverage (90% threshold)
 ```
 
 ## Running Checks Locally
@@ -28,11 +28,11 @@ make format            # auto-fix lint + format
 
 ## Project Structure
 
-- `src/silicon/` — core CLI module (Greeter, CLI app)
-- `tests/` — pytest unit tests and smoke tests
-- `scripts/` — utility scripts (build, QR codes)
-- `pyproject.toml` — project config, dependencies, and tool settings
-- `Makefile` — build/test/lint commands
+- `src/meta_one/` - core package (detect, deps, scripts, env, size, contributors, health, output, cli)
+- `tests/` - pytest unit tests and smoke tests
+- `scripts/` - utility scripts (build)
+- `pyproject.toml` - project config, dependencies, tool settings
+- `Makefile` - build/test/lint commands
 
 ## Key Conventions
 

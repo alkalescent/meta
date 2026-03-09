@@ -8,11 +8,8 @@ from pathlib import Path
 PACKAGE_NAME = Path(__file__).parent.name
 
 try:
-    __version__ = get_version(PACKAGE_NAME)
+    __version__ = get_version("meta.one")
 except PackageNotFoundError:
     __version__ = "0.0.0"
 
-# Re-export public API
-from silicon.tools import Greeter  # noqa: E402
-
-__all__ = ["Greeter", "__version__", "PACKAGE_NAME"]
+__all__ = ["__version__", "PACKAGE_NAME"]

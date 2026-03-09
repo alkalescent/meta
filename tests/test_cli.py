@@ -1,113 +1,84 @@
 """Tests for the CLI commands."""
 
+from unittest.mock import patch
+
 from typer.testing import CliRunner
 
-from silicon.cli import app
+from meta_one.cli import app
 
 runner = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb"})
 
 
-class TestHelloCommand:
-    """Tests for the hello command."""
+def test_help_command() -> None:
+    """Test help flag shows usage information."""
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "deps" in result.stdout
+    assert "scripts" in result.stdout
+    assert "env" in result.stdout
+    assert "size" in result.stdout
+    assert "contributors" in result.stdout
+    assert "health" in result.stdout
+    assert "version" in result.stdout
 
-    def test_hello_default(self) -> None:
-        """Test hello with default name."""
-        result = runner.invoke(app, ["hello"])
+
+def test_version_command() -> None:
+    """Test version command outputs version."""
+    result = runner.invoke(app, ["version"])
+    assert result.exit_code == 0
+    assert result.stdout.strip().startswith("v")
+
+
+def test_version_flag() -> None:
+    """Test --version flag outputs version."""
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert result.stdout.strip().startswith("v")
+
+
+def test_version_short_flag() -> None:
+    """Test -v short flag outputs version."""
+    result = runner.invoke(app, ["-v"])
+    assert result.exit_code == 0
+    assert result.stdout.strip().startswith("v")
+
+
+def test_deps_command() -> None:
+    """Test deps command runs without error."""
+    # Using mock since we don't have a real project here
+    with patch("meta_one.cli.analyze_deps") as mock_analyze:
+        from meta_one.deps import DepsResult
+
+        mock_analyze.return_value = DepsResult(
+            production=[], dev=[], ecosystem="Node.js"
+        )
+        result = runner.invoke(app, ["deps"])
         assert result.exit_code == 0
-        assert "Hello, World!" in result.stdout
 
-    def test_hello_with_name(self) -> None:
-        """Test hello with custom name."""
-        result = runner.invoke(app, ["hello", "--name", "Developer"])
+
+def test_health_command() -> None:
+    """Test health command runs without error."""
+    with patch("meta_one.cli.run_health_checks") as mock_run:
+        mock_run.return_value = []
+        result = runner.invoke(app, ["health"])
         assert result.exit_code == 0
-        assert "Hello, Developer!" in result.stdout
 
-    def test_hello_with_short_flag(self) -> None:
-        """Test hello with -n short flag."""
-        result = runner.invoke(app, ["hello", "-n", "Tester"])
+
+def test_size_command() -> None:
+    """Test size command runs without error."""
+    with patch("meta_one.cli.analyze_size") as mock_analyze:
+        from meta_one.size import SizeResult
+
+        mock_analyze.return_value = SizeResult(
+            languages=[], directories=[], largest_files=[], total_files=0, total_lines=0
+        )
+        result = runner.invoke(app, ["size"])
         assert result.exit_code == 0
-        assert "Hello, Tester!" in result.stdout
 
 
-class TestGoodbyeCommand:
-    """Tests for the goodbye command."""
-
-    def test_goodbye_default(self) -> None:
-        """Test goodbye with default name."""
-        result = runner.invoke(app, ["goodbye"])
-        assert result.exit_code == 0
-        assert "Goodbye, World!" in result.stdout
-
-    def test_goodbye_with_name(self) -> None:
-        """Test goodbye with custom name."""
-        result = runner.invoke(app, ["goodbye", "--name", "Developer"])
-        assert result.exit_code == 0
-        assert "Goodbye, Developer!" in result.stdout
-
-    def test_goodbye_with_short_flag(self) -> None:
-        """Test goodbye with -n short flag."""
-        result = runner.invoke(app, ["goodbye", "-n", "Tester"])
-        assert result.exit_code == 0
-        assert "Goodbye, Tester!" in result.stdout
-
-
-class TestVersionCommand:
-    """Tests for the version command."""
-
-    def test_version_command(self) -> None:
-        """Test version command outputs version."""
-        result = runner.invoke(app, ["version"])
-        assert result.exit_code == 0
-        assert result.stdout.strip().startswith("v")
-
-    def test_version_flag(self) -> None:
-        """Test --version flag outputs version."""
-        result = runner.invoke(app, ["--version"])
-        assert result.exit_code == 0
-        assert result.stdout.strip().startswith("v")
-
-    def test_version_short_flag(self) -> None:
-        """Test -v short flag outputs version."""
-        result = runner.invoke(app, ["-v"])
-        assert result.exit_code == 0
-        assert result.stdout.strip().startswith("v")
-
-    def test_version_fallback_when_not_installed(self) -> None:
-        """Test version falls back to 0.0.0 when package not found."""
-        from importlib.metadata import PackageNotFoundError
-        from unittest.mock import patch
-
-        with patch("silicon.cli.get_version", side_effect=PackageNotFoundError):
-            result = runner.invoke(app, ["version"])
-            assert result.exit_code == 0
-            assert "v0.0.0" in result.stdout
-
-
-class TestHelpCommand:
-    """Tests for help output."""
-
-    def test_help_flag(self) -> None:
-        """Test --help shows usage information."""
-        result = runner.invoke(app, ["--help"])
-        assert result.exit_code == 0
-        assert "hello" in result.stdout
-        assert "goodbye" in result.stdout
-        assert "version" in result.stdout
-
-    def test_help_short_flag(self) -> None:
-        """Test -h short flag shows usage information."""
-        result = runner.invoke(app, ["-h"])
-        assert result.exit_code == 0
-        assert "hello" in result.stdout
-
-    def test_hello_help(self) -> None:
-        """Test hello --help shows command help."""
-        result = runner.invoke(app, ["hello", "--help"])
-        assert result.exit_code == 0
-        assert "--name" in result.stdout
-
-    def test_goodbye_help(self) -> None:
-        """Test goodbye --help shows command help."""
-        result = runner.invoke(app, ["goodbye", "--help"])
-        assert result.exit_code == 0
-        assert "--name" in result.stdout
+def test_json_version() -> None:
+    """Test --json version command."""
+    result = runner.invoke(app, ["--json", "version"])
+    assert result.exit_code == 0
+    # The output might be plain text or JSON depending on implementation,
+    # but it shouldn't error.

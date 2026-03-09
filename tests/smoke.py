@@ -1,154 +1,82 @@
-#!/usr/bin/env python3
-"""Smoke tests for verifying installation and CLI functionality.
+"""Smoke tests for the meta_one CLI."""
 
-Prerequisites:
-    The package must be installed (e.g., `uv sync` or `pip install -e .`) before
-    running these tests, as they verify both package imports and CLI functionality.
+from __future__ import annotations
 
-Usage:
-    # Test installed package CLI
-    python tests/smoke.py silicon
-
-    # Test a specific binary
-    python tests/smoke.py ./silicon-macos-portable
-
-Alternative approach:
-    If you want to test binaries WITHOUT requiring the package to be installed,
-    you could add a --binary flag to skip import tests:
-
-        is_binary = "--binary" in sys.argv or cmd[0].startswith("./")
-        if not is_binary:
-            test_imports()
-            test_module_invocation()
-
-    However, the current approach requires `uv sync` in CI workflows to ensure
-    comprehensive testing of both the binary AND the package imports.
-"""
-
-import importlib
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 
-def run(cmd: list[str]) -> subprocess.CompletedProcess:
-    """Run a command and return the completed process. Raises on error."""
-    # Using check=True to automatically raise CalledProcessError on non-zero exit codes.
-    return subprocess.run(cmd, capture_output=True, text=True, check=True)
-
-
 def get_package_name() -> str:
-    """Get package name from pyproject.toml."""
-    # Assumes Python 3.11+ for tomllib
-    current_path = Path(__file__).resolve().parent
-    while current_path != current_path.parent:
-        pyproject_path = current_path / "pyproject.toml"
-        if pyproject_path.exists():
-            with open(pyproject_path, "rb") as f:
-                data = tomllib.load(f)
-            return data["project"]["name"]
-        current_path = current_path.parent
-    raise RuntimeError("Could not find pyproject.toml in parent directories.")
+    """Get the package name from pyproject.toml.
 
+    Returns:
+        str: Package name.
+    """
+    pyproject = Path(__file__).parent.parent / "pyproject.toml"
+    if not pyproject.exists():
+        return "meta_one"
 
-def test_version(cmd: list[str]) -> None:
-    """Test version command works."""
-    result = run([*cmd, "version"])
-    version = result.stdout.strip()
-    assert version, "version output empty"
-    assert version.startswith("v"), "version should start with 'v'"
-    print(f"[+] version: {version}")
-
-
-def test_help(cmd: list[str]) -> None:
-    """Test help command works."""
-    result = run([*cmd, "--help"])
-    out = result.stdout
-    assert "hello" in out, "missing hello command"
-    assert "goodbye" in out, "missing goodbye command"
-    print("[+] help")
-
-
-def test_hello(cmd: list[str]) -> None:
-    """Test hello command works."""
-    result = run([*cmd, "hello"])
-    out = result.stdout.strip()
-    assert "Hello, World!" in out, "hello output unexpected"
-    print("[+] hello")
-
-
-def test_goodbye(cmd: list[str]) -> None:
-    """Test goodbye command works."""
-    result = run([*cmd, "goodbye"])
-    out = result.stdout.strip()
-    assert "Goodbye, World!" in out, "goodbye output unexpected"
-    print("[+] goodbye")
-
-
-def test_module_invocation() -> None:
-    """Test python -m <package> works."""
-    package = get_package_name()
-    result = run([sys.executable, "-m", package, "version"])
-    version = result.stdout.strip()
-    assert version, "module version output empty"
-    print(f"[+] python -m {package} version: {version}")
+    for line in pyproject.read_text().splitlines():
+        if line.startswith("name = "):
+            return line.split("=")[1].strip().strip('"').strip("'")
+    return "meta_one"
 
 
 def test_imports() -> None:
-    """Test package imports work correctly."""
-    package = get_package_name()
+    """Test importing modules."""
+    import meta_one
+    import meta_one.cli
+    import meta_one.detect
+    import meta_one.output
 
-    # Test main package imports
-    pkg = importlib.import_module(package)
-    assert hasattr(pkg, "Greeter")
-    assert hasattr(pkg, "__version__")
-    assert pkg.__version__, "version is empty"
-
-    # Test submodule imports
-    tools_module = importlib.import_module(f"{package}.tools")
-    assert hasattr(tools_module, "Greeter")
-
-    cli_module = importlib.import_module(f"{package}.cli")
-    assert hasattr(cli_module, "app")
-    assert hasattr(cli_module, "hello")
-    assert hasattr(cli_module, "goodbye")
-    assert hasattr(cli_module, "version")
-
-    print(f"[+] imports: Greeter, __version__={pkg.__version__}")
+    assert meta_one is not None
+    assert meta_one.cli.app is not None
+    assert meta_one.detect is not None
+    assert meta_one.output is not None
 
 
-def main() -> None:
-    """Run smoke tests."""
-    # Command can be passed as args (e.g., "./binary" or "package")
-    package = get_package_name()
-    cmd = sys.argv[1:] if len(sys.argv) > 1 else [str(package)]
-
-    print(f"Running smoke tests with: {' '.join(cmd)}")
-    try:
-        # Package-level verification (requires package to be installed)
-        test_imports()
-        test_module_invocation()
-
-        # CLI tests with provided command
-        test_version(cmd)
-        test_help(cmd)
-        test_hello(cmd)
-        test_goodbye(cmd)
-        print("All smoke tests passed!")
-    except (subprocess.CalledProcessError, AssertionError) as e:
-        print("\nSmoke test failed!", file=sys.stderr)
-        if isinstance(e, subprocess.CalledProcessError):
-            print(
-                f"Command '{' '.join(e.cmd)}' failed with exit code {e.returncode}.",
-                file=sys.stderr,
-            )
-            if e.stderr:
-                print(f"Stderr:\n{e.stderr.strip()}", file=sys.stderr)
-        else:
-            print(f"Assertion failed: {e}", file=sys.stderr)
-        sys.exit(1)
+def test_cli_help() -> None:
+    """Test CLI help output via subprocess."""
+    result = subprocess.run(
+        [sys.executable, "-m", "meta_one.cli", "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "deps" in result.stdout
+    assert "scripts" in result.stdout
+    assert "env" in result.stdout
+    assert "size" in result.stdout
+    assert "contributors" in result.stdout
+    assert "health" in result.stdout
 
 
-if __name__ == "__main__":
-    main()
+def test_cli_version() -> None:
+    """Test CLI version output via subprocess."""
+    result = subprocess.run(
+        [sys.executable, "-m", "meta_one.cli", "version"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+
+
+def test_cli_size() -> None:
+    """Test CLI size output via subprocess."""
+    result = subprocess.run(
+        [sys.executable, "-m", "meta_one.cli", "size"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+
+
+def test_cli_health() -> None:
+    """Test CLI health output via subprocess."""
+    result = subprocess.run(
+        [sys.executable, "-m", "meta_one.cli", "health"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0

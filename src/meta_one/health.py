@@ -57,16 +57,17 @@ def run_health_checks(root: Path) -> list[HealthCheck]:
 
     # 3. Missing env vars
     try:
-        from .env import get_missing_env_vars
+        from .env import analyze_env
 
-        missing = get_missing_env_vars(root)
+        env_result = analyze_env(root)
+        missing = [v for v in env_result.expected_vars if v.status == "MISSING"]
+
         if missing:
-            checks.append(
-                HealthCheck("fail", f"Missing required env vars: {', '.join(missing)}")
-            )
+            msg = f"{len(missing)} missing required env vars"
+            checks.append(HealthCheck(status="fail", message=msg))
         else:
             checks.append(
-                HealthCheck("ok", "No missing required environment variables")
+                HealthCheck(status="ok", message="No missing required env vars")
             )
     except ImportError:
         checks.append(

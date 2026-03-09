@@ -4,7 +4,7 @@ NAME := $(shell basename $(CURDIR))
 UV_SYNC := uv sync $(if $(DEV),--dev,--no-dev)
 UV_SYNC_FROZEN := uv sync --frozen $(if $(DEV),--dev,--no-dev)
 
-.PHONY: install ci lint type format smoke test cov build clean qr help all
+.PHONY: install ci lint type format smoke test cov build clean help all
 
 help:
 	@echo "Available targets:"
@@ -17,7 +17,6 @@ help:
 	@echo "  test    - Run tests with pytest"
 	@echo "  cov     - Run tests with pytest and coverage"
 	@echo "  build   - Build binary with Nuitka"
-	@echo "  qr      - Generate QR codes for donation addresses"
 	@echo "  clean   - Remove build artifacts"
 	@echo "  all     - Run lint, test, and build"
 
@@ -50,12 +49,9 @@ cov:
 build:
 	bash scripts/build.sh
 
-qr:
-	uv run python scripts/qr.py
-
 clean:
 	rm -rf cli.dist/ dist/ build/ *.egg-info/ .coverage coverage.xml
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
 
-all: build smoke cov qr format
+all: build smoke cov format
