@@ -2,13 +2,14 @@
 
 set -eu
 
-# Extract project name from README.md
-NAME="$(grep '^#' README.md | head -n 1 | sed -e 's/^# *//' -e 's/ *$//')"
-
-# If CI is true, then use basename of $GITHUB_REPOSITORY as name
-if [ "${CI:-false}" = "true" ]; then
-  NAME=$(basename "$GITHUB_REPOSITORY")
-fi
+# Derive the binary name and source module from [project.scripts] in
+# pyproject.toml, e.g. `meta = "meta_one.cli:app"` -> NAME=meta,
+# MODULE=meta_one. The binary name and the package directory are not
+# guaranteed to match (PyPI names may contain dots that aren't valid in
+# directory names), so both must come from the same source of truth.
+SCRIPT_LINE="$(grep -m1 -E '^[a-zA-Z0-9_.-]+ = "[a-zA-Z0-9_.]+:[a-zA-Z0-9_]+"' pyproject.toml)"
+NAME="$(echo "$SCRIPT_LINE" | sed -E 's/^([a-zA-Z0-9_.-]+) = .*/\1/')"
+MODULE="$(echo "$SCRIPT_LINE" | sed -E 's/.* = "([a-zA-Z0-9_.]+)\..*/\1/')"
 
 MODE="${MODE:-standalone}"
 
@@ -17,4 +18,4 @@ uv run python -m nuitka \
   --output-filename="${NAME}" \
   --remove-output \
   --assume-yes-for-downloads \
-  src/${NAME}/cli.py
+  "src/${MODULE//./\/}/cli.py"
