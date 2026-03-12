@@ -60,7 +60,7 @@ def run_health_checks(root: Path) -> list[HealthCheck]:
         from .env import analyze_env
 
         env_result = analyze_env(root)
-        missing = [v for v in env_result.expected_vars if v.status == "MISSING"]
+        missing = [v for v in env_result.expected_vars if v.status == "missing"]
 
         if missing:
             msg = f"{len(missing)} missing required env vars"
