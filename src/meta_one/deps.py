@@ -30,12 +30,39 @@ class DepsResult:
     ecosystem: str
 
 
-def analyze_deps(root: Path, dev_only: bool = False) -> DepsResult:
+def _normalize_pkg_name(name: str) -> str:
+    """Normalize a package name for case/separator-insensitive comparison (PEP 503)."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _dev_dependency_names(pyproject: Path) -> set[str]:
+    """Extract normalized package names listed under [dependency-groups].dev.
+
+    Args:
+        pyproject: Path to pyproject.toml.
+
+    Returns:
+        Set of normalized package names.
+    """
+    if not pyproject.exists():
+        return set()
+    try:
+        toml_data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    names: set[str] = set()
+    for dep in toml_data.get("dependency-groups", {}).get("dev", []):
+        match = re.match(r"^([a-zA-Z0-9_.\-]+)", dep)
+        if match:
+            names.add(_normalize_pkg_name(match.group(1)))
+    return names
+
+
+def analyze_deps(root: Path) -> DepsResult:
     """Analyze dependencies in the given root directory.
 
     Args:
         root: The root directory to scan.
-        dev_only: Whether to only parse dev dependencies.
 
     Returns:
         A DepsResult containing parsed production and dev dependencies.
@@ -167,8 +194,12 @@ def _parse_python(root: Path) -> DepsResult:
             matches = re.finditer(
                 r'\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"', content
             )
+            dev_names = _dev_dependency_names(pyproject)
             for match in matches:
-                production.append(Dependency(match.group(1), match.group(2), False))
+                name, version = match.group(1), match.group(2)
+                is_dev = _normalize_pkg_name(name) in dev_names
+                dep = Dependency(name, version, is_dev)
+                (dev if is_dev else production).append(dep)
         except Exception:
             pass
     elif pyproject.exists():
@@ -260,3 +291,4 @@ def _parse_php(root: Path) -> DepsResult:
             pass
 
     return DepsResult(production, dev, "PHP")
+

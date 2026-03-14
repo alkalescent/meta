@@ -96,7 +96,7 @@ def _find_env_usages(root: Path, keys: set[str]) -> dict[str, list[str]]:
         re.compile(r"os\.getenv\([\"']([A-Z0-9_]+)[\"']\)", re.IGNORECASE),
         re.compile(r"std::env::var\([\"']([A-Z0-9_]+)[\"']\)"),
         re.compile(r"ENV\[[\"']([A-Z0-9_]+)[\"']\]"),
-        re.compile(r"getenv\([\"']([A-Z0-9_]+)[\"']\)"),
+        re.compile(r"getenv\([\"']([A-Z0-9_]+)[\"']\)", re.IGNORECASE),
     ]
 
     for dirpath, dirnames, filenames in os.walk(root):

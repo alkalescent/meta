@@ -16,6 +16,7 @@ class LanguageStats:
     name: str
     files: int
     lines: int
+    bytes: int
     percentage: float
 
 
@@ -26,6 +27,7 @@ class DirStats:
     path: str
     files: int
     lines: int
+    bytes: int
 
 
 @dataclass
@@ -34,6 +36,7 @@ class FileStats:
 
     path: str
     lines: int
+    bytes: int
 
 
 @dataclass
@@ -45,6 +48,7 @@ class SizeResult:
     largest_files: list[FileStats]
     total_files: int
     total_lines: int
+    total_bytes: int
 
 
 EXTENSION_MAP: dict[str, str] = {
@@ -199,7 +203,7 @@ def analyze_size(
 
     Args:
         root: The root directory to analyze.
-        sort_by: How to sort the results ("lines", "files").
+        sort_by: How to sort the results ("lines", "files", or "bytes").
         depth: The maximum directory depth to show in stats.
         code_only: Whether to skip empty lines and comments.
 
@@ -215,12 +219,13 @@ def analyze_size(
 
     total_files = 0
     total_lines = 0
+    total_bytes = 0
 
     lang_counts: dict[str, dict[str, int]] = defaultdict(
-        lambda: {"files": 0, "lines": 0}
+        lambda: {"files": 0, "lines": 0, "bytes": 0}
     )
     dir_counts: dict[str, dict[str, int]] = defaultdict(
-        lambda: {"files": 0, "lines": 0}
+        lambda: {"files": 0, "lines": 0, "bytes": 0}
     )
     file_stats: list[FileStats] = []
 
@@ -238,13 +243,17 @@ def analyze_size(
         if lines == 0:
             continue
 
+        size_bytes = abs_path.stat().st_size
+
         total_files += 1
         total_lines += lines
+        total_bytes += size_bytes
 
         lang_counts[lang]["files"] += 1
         lang_counts[lang]["lines"] += lines
+        lang_counts[lang]["bytes"] += size_bytes
 
-        file_stats.append(FileStats(path=f_str, lines=lines))
+        file_stats.append(FileStats(path=f_str, lines=lines, bytes=size_bytes))
 
         # Directory stats
         parts = f_path.parts[:-1]
@@ -254,6 +263,7 @@ def analyze_size(
                 continue
             dir_counts[dir_path]["files"] += 1
             dir_counts[dir_path]["lines"] += lines
+            dir_counts[dir_path]["bytes"] += size_bytes
 
     languages = []
     for name, stats in lang_counts.items():
@@ -263,24 +273,23 @@ def analyze_size(
                 name=name,
                 files=stats["files"],
                 lines=stats["lines"],
+                bytes=stats["bytes"],
                 percentage=pct,
             )
         )
 
     directories = [
-        DirStats(path=p, files=s["files"], lines=s["lines"])
+        DirStats(path=p, files=s["files"], lines=s["lines"], bytes=s["bytes"])
         for p, s in dir_counts.items()
     ]
 
-    # Sort
-    if sort_by == "lines":
-        languages.sort(key=lambda x: x.lines, reverse=True)
-        directories.sort(key=lambda x: x.lines, reverse=True)
-    else:
-        languages.sort(key=lambda x: x.files, reverse=True)
-        directories.sort(key=lambda x: x.files, reverse=True)
-
-    file_stats.sort(key=lambda x: x.lines, reverse=True)
+    # Sort. "files" doesn't apply to individual FileStats, so the largest-files
+    # list falls back to sorting by bytes if that's requested, else lines.
+    sort_attr = sort_by if sort_by in ("lines", "files", "bytes") else "lines"
+    file_sort_attr = "bytes" if sort_attr == "bytes" else "lines"
+    languages.sort(key=lambda x: getattr(x, sort_attr), reverse=True)
+    directories.sort(key=lambda x: getattr(x, sort_attr), reverse=True)
+    file_stats.sort(key=lambda x: getattr(x, file_sort_attr), reverse=True)
     largest_files = file_stats[:10]
 
     return SizeResult(
@@ -289,4 +298,5 @@ def analyze_size(
         largest_files=largest_files,
         total_files=total_files,
         total_lines=total_lines,
+        total_bytes=total_bytes,
     )
