@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import tomllib
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -292,3 +295,106 @@ def _parse_php(root: Path) -> DepsResult:
 
     return DepsResult(production, dev, "PHP")
 
+
+@dataclass
+class OutdatedDependency:
+    """A dependency that has a newer version available."""
+
+    name: str
+    current: str
+    latest: str
+
+
+def check_outdated(
+    root: Path, data: DepsResult
+) -> tuple[list[OutdatedDependency], str | None]:
+    """Check for outdated dependencies for the given ecosystem.
+
+    Args:
+        root: The root directory of the project.
+        data: Already-parsed dependency data (used for ecosystem + names).
+
+    Returns:
+        A tuple of (outdated dependencies found, an optional note explaining
+        a skipped/unsupported check).
+    """
+    if data.ecosystem == "Node.js":
+        return _check_outdated_npm(root)
+    if data.ecosystem == "Python":
+        return _check_outdated_pypi(data)
+    if data.ecosystem == "Rust":
+        return _check_outdated_cargo(root)
+    return [], f"Outdated check not supported for {data.ecosystem} projects."
+
+
+def _check_outdated_npm(root: Path) -> tuple[list[OutdatedDependency], str | None]:
+    """Check outdated Node.js dependencies via `npm outdated --json`."""
+    try:
+        result = subprocess.run(
+            ["npm", "outdated", "--json"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        # npm exits 1 when outdated deps are found; stdout is still valid JSON.
+        if not result.stdout.strip():
+            return [], None
+        payload = json.loads(result.stdout)
+        outdated = [
+            OutdatedDependency(name, info.get("current", "?"), info.get("latest", "?"))
+            for name, info in payload.items()
+        ]
+        return outdated, None
+    except FileNotFoundError:
+        return [], "Outdated check skipped: npm not found."
+    except (subprocess.TimeoutExpired, json.JSONDecodeError):
+        return [], "Outdated check failed: could not query npm."
+
+
+def _check_outdated_pypi(
+    data: DepsResult,
+) -> tuple[list[OutdatedDependency], str | None]:
+    """Check outdated Python dependencies via the PyPI JSON API."""
+    outdated: list[OutdatedDependency] = []
+    for dep in [*data.production, *data.dev]:
+        try:
+            with urllib.request.urlopen(
+                f"https://pypi.org/pypi/{dep.name}/json", timeout=5
+            ) as resp:
+                info = json.loads(resp.read())
+            latest = info.get("info", {}).get("version", "")
+            if latest and latest != dep.version:
+                outdated.append(OutdatedDependency(dep.name, dep.version, latest))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+            continue
+    return outdated, None
+
+
+def _check_outdated_cargo(root: Path) -> tuple[list[OutdatedDependency], str | None]:
+    """Check outdated Rust dependencies via the `cargo-outdated` plugin."""
+    try:
+        result = subprocess.run(
+            ["cargo", "outdated", "--format", "json"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return [], "Outdated check skipped: cargo-outdated not installed."
+        payload = json.loads(result.stdout)
+        outdated = [
+            OutdatedDependency(
+                entry.get("name", ""),
+                entry.get("project", "?"),
+                entry.get("latest", "?"),
+            )
+            for entry in payload.get("dependencies", [])
+            if entry.get("latest") not in (None, entry.get("project"))
+        ]
+        return outdated, None
+    except FileNotFoundError:
+        return [], "Outdated check skipped: cargo not found."
+    except (subprocess.TimeoutExpired, json.JSONDecodeError):
+        return [], "Outdated check failed: could not query cargo."

@@ -10,7 +10,7 @@ from typing import Annotated
 import typer
 
 from meta_one.contributors import analyze_contributors
-from meta_one.deps import analyze_deps
+from meta_one.deps import analyze_deps, check_outdated
 from meta_one.detect import detect_project_type
 from meta_one.env import analyze_env
 from meta_one.health import run_health_checks
@@ -19,12 +19,23 @@ from meta_one.output import (
     SYMBOL_OK,
     SYMBOL_WARN,
     Context,
+    format_table,
     json_out,
 )
 from meta_one.scripts import discover_scripts
 from meta_one.size import analyze_size
 
 app = typer.Typer(invoke_without_command=True)
+
+# health.py's HealthCheck.status is one of "ok"/"warn"/"fail"/"optional" —
+# never "pass". Both symbol rendering and issue counting must branch on
+# these actual values.
+_STATUS_SYMBOLS = {
+    "ok": SYMBOL_OK,
+    "warn": SYMBOL_WARN,
+    "optional": SYMBOL_WARN,
+    "fail": SYMBOL_FAIL,
+}
 
 
 def get_version() -> str:
@@ -89,31 +100,26 @@ def _overview(ctx: Context) -> None:
     Args:
         ctx (Context): The application context.
     """
-    if ctx.json_output:
-        typer.echo(json_out({"overview": "Not fully implemented in JSON for overview"}))
-        return
-
-    # Basic overview data gathering
     target_path = Path(ctx.path)
     project_name = target_path.name
     proj_type = detect_project_type(target_path).project_type
 
-    # Gather data from modules
     size_data = analyze_size(target_path)
     files = size_data.total_files if size_data else 0
     lines = size_data.total_lines if size_data else 0
+    top_lang = size_data.languages[0] if size_data and size_data.languages else None
 
     deps_data = analyze_deps(target_path)
     deps_count = len(deps_data.production) if deps_data else 0
     dev_count = len(deps_data.dev) if deps_data else 0
 
-    scripts = discover_scripts(target_path)
-    scripts_count = sum(len(s.scripts) for s in scripts)
+    scripts_data = discover_scripts(target_path)
+    scripts_count = sum(len(s.scripts) for s in scripts_data)
 
     env_data = analyze_env(target_path)
     env_vars = env_data.expected_vars if env_data else []
     expected = len(env_vars)
-    missing = sum(1 for v in env_vars if v.status == "MISSING")
+    missing = sum(1 for v in env_vars if v.status == "missing")
 
     # Git stats
     branch = "unknown"
@@ -135,11 +141,41 @@ def _overview(ctx: Context) -> None:
         pass
 
     health_data = run_health_checks(target_path)
-    issues = sum(1 for h in health_data if h.status != "pass")
+    issues = sum(1 for h in health_data if h.status in ("fail", "warn"))
+
+    if ctx.json_output:
+        typer.echo(
+            json_out(
+                {
+                    "project": project_name,
+                    "type": proj_type,
+                    "language": top_lang.name if top_lang else "Unknown",
+                    "language_percentage": round(top_lang.percentage, 1)
+                    if top_lang
+                    else 0.0,
+                    "files": files,
+                    "lines": lines,
+                    "dependencies": deps_count,
+                    "dev_dependencies": dev_count,
+                    "scripts": scripts_count,
+                    "env_expected": expected,
+                    "env_missing": missing,
+                    "git_branch": branch,
+                    "git_uncommitted": uncommitted,
+                    "last_commit": last_commit,
+                    "health_issues": issues,
+                }
+            )
+        )
+        return
+
+    language_line = (
+        f"{top_lang.name} ({top_lang.percentage:.0f}%)" if top_lang else "Unknown"
+    )
 
     typer.echo(f"Project:     {project_name}")
     typer.echo(f"Type:        {proj_type}")
-    typer.echo("Language:    Unknown (0%)")  # Needs real language breakdown
+    typer.echo(f"Language:    {language_line}")
     typer.echo(f"Size:        {files} files, {lines} lines")
     typer.echo(f"Deps:        {deps_count} dependencies, {dev_count} dev")
     typer.echo(f"Scripts:     {scripts_count} runnable")
@@ -162,29 +198,55 @@ def deps(
     ] = False,
 ) -> None:
     """Analyze project dependencies."""
-    if outdated:
-        typer.echo("Note: Outdated check not yet fully implemented.")
+    root = Path(ctx.obj.path)
+    data = analyze_deps(root)
 
-    data = analyze_deps(Path(ctx.obj.path))
+    outdated_deps = []
+    outdated_note = None
+    if outdated:
+        outdated_deps, outdated_note = check_outdated(root, data)
+
     if ctx.obj.json_output:
-        typer.echo(
-            json_out(
-                {
-                    "production": [d.__dict__ for d in data.production],
-                    "dev": [d.__dict__ for d in data.dev],
-                }
-            )
+        payload = (
+            {"dev": [d.__dict__ for d in data.dev]}
+            if dev
+            else {
+                "production": [d.__dict__ for d in data.production],
+                "dev": [d.__dict__ for d in data.dev],
+            }
         )
+        if outdated:
+            payload["outdated"] = [d.__dict__ for d in outdated_deps]
+            if outdated_note:
+                payload["outdated_note"] = outdated_note
+        typer.echo(json_out(payload))
         return
 
-    typer.echo("Production Dependencies:")
-    for d in data.production:
-        typer.echo(f"  {d.name}@{d.version}")
-
-    if dev or not data.production:
+    if ctx.obj.quiet:
+        if dev:
+            typer.echo(f"{len(data.dev)} dev dependencies")
+        else:
+            typer.echo(f"{len(data.production)} dependencies, {len(data.dev)} dev")
+    elif dev:
         typer.echo("Development Dependencies:")
-        for d in data.dev:
-            typer.echo(f"  {d.name}@{d.version}")
+        typer.echo(format_table([[d.name, d.version] for d in data.dev]))
+    else:
+        typer.echo("Production Dependencies:")
+        typer.echo(format_table([[d.name, d.version] for d in data.production]))
+        if data.dev:
+            typer.echo("Development Dependencies:")
+            typer.echo(format_table([[d.name, d.version] for d in data.dev]))
+
+    if outdated and not ctx.obj.quiet:
+        if outdated_note:
+            typer.echo(outdated_note)
+        elif outdated_deps:
+            typer.echo("Outdated:")
+            typer.echo(
+                format_table([[o.name, o.current, o.latest] for o in outdated_deps])
+            )
+        else:
+            typer.echo("All dependencies up to date.")
 
 
 @app.command()
@@ -193,11 +255,19 @@ def scripts(
     run: Annotated[str | None, typer.Option("--run", help="Run a script.")] = None,
 ) -> None:
     """Discover project scripts."""
-    if run:
-        typer.echo(f"Running script {run} (not fully implemented)")
-        return
+    root = Path(ctx.obj.path)
+    data = discover_scripts(root)
 
-    data = discover_scripts(Path(ctx.obj.path))
+    if run:
+        script = next(
+            (sc for source in data for sc in source.scripts if sc.name == run), None
+        )
+        if script is None:
+            typer.echo(f"No script named '{run}' found.", err=True)
+            raise typer.Exit(code=1)
+        result = subprocess.run(script.command, shell=True, cwd=root)
+        raise typer.Exit(code=result.returncode)
+
     if ctx.obj.json_output:
         typer.echo(
             json_out(
@@ -212,9 +282,17 @@ def scripts(
         )
         return
 
-    for source in data:
-        for script in source.scripts:
-            typer.echo(f"{script.name}: {script.command}")
+    if ctx.obj.quiet:
+        total = sum(len(s.scripts) for s in data)
+        typer.echo(f"{total} scripts discovered")
+        return
+
+    rows = [
+        [script.name, script.command, script.description]
+        for source in data
+        for script in source.scripts
+    ]
+    typer.echo(format_table(rows))
 
 
 @app.command()
@@ -225,9 +303,12 @@ def env(ctx: typer.Context) -> None:
         typer.echo(json_out({"variables": [v.__dict__ for v in data.expected_vars]}))
         return
 
-    for var in data.expected_vars:
-        status = var.status
-        typer.echo(f"{var.name}: {status}")
+    if ctx.obj.quiet:
+        missing = sum(1 for v in data.expected_vars if v.status == "missing")
+        typer.echo(f"{len(data.expected_vars)} expected, {missing} missing")
+        return
+
+    typer.echo(format_table([[var.name, var.status] for var in data.expected_vars]))
 
 
 @app.command()
@@ -245,11 +326,54 @@ def size(
     )
     if ctx.obj.json_output:
         typer.echo(
-            json_out({"total_lines": data.total_lines, "total_files": data.total_files})
+            json_out(
+                {
+                    "total_lines": data.total_lines,
+                    "total_files": data.total_files,
+                    "total_bytes": data.total_bytes,
+                    "languages": [lang.__dict__ for lang in data.languages],
+                    "directories": [d.__dict__ for d in data.directories],
+                    "largest_files": [f.__dict__ for f in data.largest_files],
+                }
+            )
         )
         return
 
-    typer.echo(f"Total lines: {data.total_lines}")
+    typer.echo(
+        f"Total: {data.total_files} files, {data.total_lines} lines, "
+        f"{data.total_bytes} bytes"
+    )
+
+    if ctx.obj.quiet:
+        return
+
+    if data.languages:
+        typer.echo("\nLanguages:")
+        typer.echo(
+            format_table(
+                [
+                    [
+                        lang.name,
+                        str(lang.files),
+                        str(lang.lines),
+                        f"{lang.percentage:.1f}%",
+                    ]
+                    for lang in data.languages
+                ]
+            )
+        )
+
+    if data.directories:
+        typer.echo("\nDirectories:")
+        typer.echo(
+            format_table(
+                [[d.path, str(d.files), str(d.lines)] for d in data.directories]
+            )
+        )
+
+    if data.largest_files:
+        typer.echo("\nLargest Files:")
+        typer.echo(format_table([[f.path, str(f.lines)] for f in data.largest_files]))
 
 
 @app.command()
@@ -266,8 +390,13 @@ def contributors(
         typer.echo(json_out({"contributors": [c.__dict__ for c in data.contributors]}))
         return
 
-    for c in data.contributors:
-        typer.echo(f"{c.name}: {c.commits} commits")
+    if ctx.obj.quiet:
+        typer.echo(f"{len(data.contributors)} contributors")
+        return
+
+    typer.echo(
+        format_table([[c.name, f"{c.commits} commits"] for c in data.contributors])
+    )
 
 
 @app.command()
@@ -278,9 +407,14 @@ def health(ctx: typer.Context) -> None:
         typer.echo(json_out([c.__dict__ for c in data]))
         return
 
-    for check in data:
-        status_sym = SYMBOL_OK if check.status == "pass" else SYMBOL_FAIL
-        typer.echo(f"{status_sym} {check.message}")
+    checks = (
+        [c for c in data if c.status in ("fail", "warn")] if ctx.obj.quiet else data
+    )
+    typer.echo(
+        format_table(
+            [[_STATUS_SYMBOLS.get(c.status, SYMBOL_FAIL), c.message] for c in checks]
+        )
+    )
 
 
 @app.command()
