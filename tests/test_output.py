@@ -1,15 +1,12 @@
 """Tests for shared output utilities."""
 
-from meta_one.output import Context, format_table, json_out, style
+from __future__ import annotations
 
+from unittest.mock import patch
 
-def test_style_color() -> None:
-    """Test styling text with color."""
-    # Assuming _supports_color returns True for tests, or we mock it.
-    # Actually, if NO_COLOR is set by the runner, it might return False.
-    # We'll just test the logic ignoring the actual terminal capabilities
-    # by mocking the _supports_color function.
-    pass  # We can't easily test ANSI codes without mocking sys.stdout.isatty or env vars
+import pytest
+
+from meta_one.output import Context, _supports_color, format_table, json_out, style
 
 
 def test_style_no_color_context() -> None:
@@ -17,6 +14,68 @@ def test_style_no_color_context() -> None:
     ctx = Context(no_color=True)
     text = "Hello"
     assert style(text, color="red", ctx=ctx) == text
+
+
+def test_style_supports_color_false() -> None:
+    """Test styling returns plain text when the terminal doesn't support color."""
+    with patch("meta_one.output._supports_color", return_value=False):
+        assert style("Hello", color="red") == "Hello"
+
+
+def test_style_color_and_bold() -> None:
+    """Test styling wraps text in the correct ANSI codes."""
+    with patch("meta_one.output._supports_color", return_value=True):
+        result = style("Hello", color="red", bold=True)
+        assert result == "\033[1;31mHello\033[0m"
+
+
+def test_style_color_only() -> None:
+    """Test styling with only a color, no bold."""
+    with patch("meta_one.output._supports_color", return_value=True):
+        result = style("Hello", color="green")
+        assert result == "\033[32mHello\033[0m"
+
+
+def test_style_bold_only() -> None:
+    """Test styling with only bold, no color."""
+    with patch("meta_one.output._supports_color", return_value=True):
+        result = style("Hello", bold=True)
+        assert result == "\033[1mHello\033[0m"
+
+
+def test_style_unknown_color() -> None:
+    """Test styling with an unrecognized color name is a no-op."""
+    with patch("meta_one.output._supports_color", return_value=True):
+        assert style("Hello", color="notacolor") == "Hello"
+
+
+def test_supports_color_no_color_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test NO_COLOR env var disables color support."""
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert _supports_color() is False
+
+
+def test_supports_color_dumb_term(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test TERM=dumb disables color support."""
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "dumb")
+    assert _supports_color() is False
+
+
+def test_supports_color_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test color support is enabled for an interactive TTY."""
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("TERM", raising=False)
+    with patch("sys.stdout.isatty", return_value=True):
+        assert _supports_color() is True
+
+
+def test_supports_color_not_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test color support is disabled for a non-interactive stream."""
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("TERM", raising=False)
+    with patch("sys.stdout.isatty", return_value=False):
+        assert _supports_color() is False
 
 
 def test_format_table_empty() -> None:
@@ -32,6 +91,18 @@ def test_format_table_content() -> None:
     assert "Age" in formatted
     assert "Alice" in formatted
     assert "30" in formatted
+
+
+def test_format_table_strips_ansi_for_alignment() -> None:
+    """Test formatting strips embedded ANSI codes when computing column widths."""
+    rows = [
+        ["\033[31mRed\033[0m", "short"],
+        ["longer-name", "value"],
+    ]
+    formatted = format_table(rows)
+    lines = formatted.split("\n")
+    assert "Red" in lines[0]
+    assert "longer-name" in lines[1]
 
 
 def test_json_out() -> None:

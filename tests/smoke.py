@@ -2,25 +2,30 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 
 def get_package_name() -> str:
-    """Get the package name from pyproject.toml.
+    """Get the importable package name from [project.scripts] in pyproject.toml.
 
     Returns:
-        str: Package name.
+        str: Package name (e.g. "meta_one"), distinct from the PyPI
+            distribution name (e.g. "meta.one"), which may not be a valid
+            Python identifier.
     """
     pyproject = Path(__file__).parent.parent / "pyproject.toml"
     if not pyproject.exists():
         return "meta_one"
 
-    for line in pyproject.read_text().splitlines():
-        if line.startswith("name = "):
-            return line.split("=")[1].strip().strip('"').strip("'")
-    return "meta_one"
+    match = re.search(
+        r'^[a-zA-Z0-9_.-]+ = "([a-zA-Z0-9_.]+)\.[a-zA-Z0-9_]+:[a-zA-Z0-9_]+"',
+        pyproject.read_text(),
+        re.MULTILINE,
+    )
+    return match.group(1) if match else "meta_one"
 
 
 def test_imports() -> None:
@@ -39,7 +44,7 @@ def test_imports() -> None:
 def test_cli_help() -> None:
     """Test CLI help output via subprocess."""
     result = subprocess.run(
-        [sys.executable, "-m", "meta_one.cli", "--help"],
+        [sys.executable, "-m", f"{get_package_name()}.cli", "--help"],
         capture_output=True,
         text=True,
     )
@@ -55,7 +60,7 @@ def test_cli_help() -> None:
 def test_cli_version() -> None:
     """Test CLI version output via subprocess."""
     result = subprocess.run(
-        [sys.executable, "-m", "meta_one.cli", "version"],
+        [sys.executable, "-m", f"{get_package_name()}.cli", "version"],
         capture_output=True,
         text=True,
     )
@@ -65,7 +70,7 @@ def test_cli_version() -> None:
 def test_cli_size() -> None:
     """Test CLI size output via subprocess."""
     result = subprocess.run(
-        [sys.executable, "-m", "meta_one.cli", "size"],
+        [sys.executable, "-m", f"{get_package_name()}.cli", "size"],
         capture_output=True,
         text=True,
     )
@@ -75,8 +80,17 @@ def test_cli_size() -> None:
 def test_cli_health() -> None:
     """Test CLI health output via subprocess."""
     result = subprocess.run(
-        [sys.executable, "-m", "meta_one.cli", "health"],
+        [sys.executable, "-m", f"{get_package_name()}.cli", "health"],
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0
+
+
+if __name__ == "__main__":
+    test_imports()
+    test_cli_help()
+    test_cli_version()
+    test_cli_size()
+    test_cli_health()
+    print("smoke tests passed")
