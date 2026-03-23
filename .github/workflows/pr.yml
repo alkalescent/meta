@@ -23,7 +23,7 @@ jobs:
       pypi_version: ${{ steps.set-version.outputs.pypi_version }}
     environment:
       name: testpypi
-      url: https://test.pypi.org/p/${{ github.event.repository.name }}
+      url: https://test.pypi.org/p/meta.one
     
     steps:
     - uses: actions/checkout@v5
