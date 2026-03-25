@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from importlib import metadata
 from pathlib import Path
 from typing import Annotated
@@ -24,6 +25,15 @@ from meta_one.output import (
 )
 from meta_one.scripts import discover_scripts
 from meta_one.size import analyze_size
+
+# Windows consoles often default to a non-UTF-8 codepage (e.g. cp1252),
+# which can't encode the ✓/⚠/✗ status symbols and raises UnicodeEncodeError.
+# Force UTF-8 with a safe fallback so output never crashes the process.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    except AttributeError:
+        pass
 
 app = typer.Typer(invoke_without_command=True)
 

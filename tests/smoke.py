@@ -41,14 +41,30 @@ def test_imports() -> None:
     assert meta_one.output is not None
 
 
-def test_cli_help() -> None:
-    """Test CLI help output via subprocess."""
+def _run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+    """Run the CLI as a subprocess and assert it exits cleanly.
+
+    Args:
+        *args: Arguments to pass to the CLI.
+
+    Returns:
+        The completed process, for further assertions on stdout.
+    """
     result = subprocess.run(
-        [sys.executable, "-m", f"{get_package_name()}.cli", "--help"],
+        [sys.executable, "-m", f"{get_package_name()}.cli", *args],
         capture_output=True,
         text=True,
     )
+    if result.returncode != 0:
+        print(f"--- stdout ---\n{result.stdout}")
+        print(f"--- stderr ---\n{result.stderr}")
     assert result.returncode == 0
+    return result
+
+
+def test_cli_help() -> None:
+    """Test CLI help output via subprocess."""
+    result = _run_cli("--help")
     assert "deps" in result.stdout
     assert "scripts" in result.stdout
     assert "env" in result.stdout
@@ -59,32 +75,17 @@ def test_cli_help() -> None:
 
 def test_cli_version() -> None:
     """Test CLI version output via subprocess."""
-    result = subprocess.run(
-        [sys.executable, "-m", f"{get_package_name()}.cli", "version"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
+    _run_cli("version")
 
 
 def test_cli_size() -> None:
     """Test CLI size output via subprocess."""
-    result = subprocess.run(
-        [sys.executable, "-m", f"{get_package_name()}.cli", "size"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
+    _run_cli("size")
 
 
 def test_cli_health() -> None:
     """Test CLI health output via subprocess."""
-    result = subprocess.run(
-        [sys.executable, "-m", f"{get_package_name()}.cli", "health"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
+    _run_cli("health")
 
 
 if __name__ == "__main__":
