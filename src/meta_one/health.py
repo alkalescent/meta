@@ -104,6 +104,7 @@ def run_health_checks(root: Path) -> list[HealthCheck]:
                 ["git", "-C", str(root), "log", "-1", "--format=%aI", "README.md"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 check=True,
             )
             date_str = result.stdout.strip()
@@ -141,6 +142,7 @@ def run_health_checks(root: Path) -> list[HealthCheck]:
             ["git", "-C", str(root), "ls-files"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=True,
         ).stdout.splitlines()
 

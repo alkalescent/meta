@@ -335,6 +335,7 @@ def _check_outdated_npm(root: Path) -> tuple[list[OutdatedDependency], str | Non
             cwd=str(root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=30,
         )
         # npm exits 1 when outdated deps are found; stdout is still valid JSON.
@@ -379,6 +380,7 @@ def _check_outdated_cargo(root: Path) -> tuple[list[OutdatedDependency], str | N
             cwd=str(root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=30,
         )
         if result.returncode != 0 or not result.stdout.strip():

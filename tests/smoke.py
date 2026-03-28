@@ -54,6 +54,7 @@ def _run_cli(*args: str) -> subprocess.CompletedProcess[str]:
         [sys.executable, "-m", f"{get_package_name()}.cli", *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     if result.returncode != 0:
         print(f"--- stdout ---\n{result.stdout}")

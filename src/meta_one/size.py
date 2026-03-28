@@ -155,6 +155,7 @@ def _get_files_git(root: Path) -> list[str]:
             cwd=str(root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=True,
         )
         return [f for f in result.stdout.splitlines() if f]

@@ -138,14 +138,23 @@ def _overview(ctx: Context) -> None:
 
     try:
         branch = subprocess.check_output(
-            ["git", "branch", "--show-current"], cwd=target_path, text=True
+            ["git", "branch", "--show-current"],
+            cwd=target_path,
+            text=True,
+            encoding="utf-8",
         ).strip()
         porcelain = subprocess.check_output(
-            ["git", "status", "--porcelain"], cwd=target_path, text=True
+            ["git", "status", "--porcelain"],
+            cwd=target_path,
+            text=True,
+            encoding="utf-8",
         )
         uncommitted = len([line for line in porcelain.splitlines() if line.strip()])
         last_commit = subprocess.check_output(
-            ["git", "log", "-1", "--format=%ar by %an"], cwd=target_path, text=True
+            ["git", "log", "-1", "--format=%ar by %an"],
+            cwd=target_path,
+            text=True,
+            encoding="utf-8",
         ).strip()
     except subprocess.SubprocessError:
         pass
