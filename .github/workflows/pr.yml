@@ -143,17 +143,21 @@ jobs:
     
     steps:
     - uses: actions/checkout@v5
-    
+
+    - name: Resolve PyPI project name
+      run: |
+        PYPI_NAME=$(grep -m1 '^name = ' pyproject.toml | sed -E 's/name = "(.*)"/\1/')
+        echo "PYPI_NAME=${PYPI_NAME}" >> "$GITHUB_ENV"
+
     - name: Wait for TestPyPI indexing
       run: |
-        NAME="${{ github.event.repository.name }}"
         VERSION="${{ needs.version.outputs.pypi_version }}"
         MAX_ATTEMPTS=40
         SLEEP_SECONDS=15
-        
-        echo "Waiting for ${NAME}==${VERSION} to be available on TestPyPI..."
+
+        echo "Waiting for ${PYPI_NAME}==${VERSION} to be available on TestPyPI..."
         for i in $(seq 1 $MAX_ATTEMPTS); do
-          if curl -sf "https://test.pypi.org/pypi/${NAME}/${VERSION}/json" > /dev/null 2>&1; then
+          if curl -sf "https://test.pypi.org/pypi/${PYPI_NAME}/${VERSION}/json" > /dev/null 2>&1; then
             echo "Package available after $((i * SLEEP_SECONDS)) seconds"
             exit 0
           fi
@@ -162,17 +166,17 @@ jobs:
         done
         echo "Timed out waiting for package after $((MAX_ATTEMPTS * SLEEP_SECONDS)) seconds"
         exit 1
-    
+
     - uses: actions/setup-python@v6
       with:
         python-version: '3.13'
-    
+
     - name: Install from TestPyPI
       run: |
         pip install --index-url https://test.pypi.org/simple/ \
           --extra-index-url https://pypi.org/simple/ \
-          ${{ github.event.repository.name }}==${{ needs.version.outputs.pypi_version }}
-    
+          ${PYPI_NAME}==${{ needs.version.outputs.pypi_version }}
+
     - name: Run smoke tests
       run: python tests/smoke.py ${{ github.event.repository.name }}
 
