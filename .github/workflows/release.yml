@@ -1,0 +1,400 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  test:
+    name: Test
+    uses: ./.github/workflows/test.yml
+
+  version:
+    name: Version
+    needs: test  # Only release after tests pass
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.version.outputs.new_tag }}
+      tag_name: ${{ steps.version.outputs.new_tag }}
+      pypi_version: ${{ steps.set-version.outputs.pypi_version }}
+    
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Bump version and push tag
+      id: version
+      uses: anothrNick/github-tag-action@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        DEFAULT_BUMP: minor
+        WITH_V: true
+        TAG_CONTEXT: repo
+        BRANCH_HISTORY: compare
+        INITIAL_VERSION: 1.0.3
+    
+    - name: Set version output
+      id: set-version
+      run: |
+        # Strip 'v' prefix for PyPI-compatible version
+        PYPI_VERSION="${NEW_TAG#v}"
+        echo "Tag version: $NEW_TAG"
+        echo "PyPI version: $PYPI_VERSION"
+        echo "pypi_version=$PYPI_VERSION" >> $GITHUB_OUTPUT
+      env:
+        NEW_TAG: ${{ steps.version.outputs.new_tag }}
+    # Note: hatch-vcs reads version from git tag at build time
+
+  publish:
+    name: Publish PyPI
+    needs: version
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/${{ github.event.repository.name }}
+    
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        ref: master
+        fetch-depth: 0  # Full history needed for hatch-vcs
+    
+    - name: Pull latest and fetch tags
+      run: |
+        git pull origin master
+        git fetch --tags
+        echo "Latest tag: $(git describe --tags --abbrev=0)"
+    
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+    
+    - name: Build distributions
+      run: |
+        uv build --sdist
+        uv build --wheel
+    
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      # Uses OIDC trusted publishing - configure at:
+      # https://pypi.org/manage/account/publishing/
+
+  build-portable:
+    name: Build Portable (${{ matrix.os }})
+    needs: version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            artifact_suffix: linux-portable
+            binary_name: ''
+          - os: macos-latest
+            artifact_suffix: macos-portable
+            binary_name: ''
+          - os: windows-latest
+            artifact_suffix: windows-portable.exe
+            binary_name: .exe
+    
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        ref: master
+    
+    - name: Pull latest changes
+      run: git pull origin master
+    
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+    
+    - name: Build onefile binary
+      env:
+        MODE: onefile
+        CI: true
+      run: make build
+      shell: bash
+    
+    - name: Rename binary with platform suffix
+      run: |
+        mv ${{ github.event.repository.name }}${{ matrix.binary_name }} ${{ github.event.repository.name }}-${{ matrix.artifact_suffix }}
+        chmod +x ${{ github.event.repository.name }}-${{ matrix.artifact_suffix }} || true
+      shell: bash
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v5
+      with:
+        name: ${{ github.event.repository.name }}-${{ matrix.artifact_suffix }}
+        path: ${{ github.event.repository.name }}-${{ matrix.artifact_suffix }}
+        if-no-files-found: error
+
+  build-fast:
+    name: Build Fast (${{ matrix.os }})
+    needs: version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-latest
+            platform: macos
+          - os: windows-latest
+            platform: windows
+    
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        ref: master
+    
+    - name: Pull latest changes
+      run: git pull origin master
+    
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+    
+    - name: Build standalone distribution
+      env:
+        MODE: standalone
+        CI: true
+      run: make build
+      shell: bash
+    
+    - name: Create archive
+      run: tar -czf "${{ github.event.repository.name }}-${{ matrix.platform }}-fast.tar.gz" cli.dist/
+      shell: bash
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v5
+      with:
+        name: ${{ github.event.repository.name }}-${{ matrix.platform }}-fast
+        path: ${{ github.event.repository.name }}-${{ matrix.platform }}-fast.tar.gz
+        if-no-files-found: error
+
+  release:
+    name: Release
+    needs: [version, build-portable, build-fast]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        ref: master
+    
+    - name: Download all artifacts
+      uses: actions/download-artifact@v5
+      with:
+        path: artifacts
+    
+    - name: Prepare release assets
+      run: |
+        mkdir -p release-assets
+        find artifacts -type f -exec cp {} release-assets/ \;
+        ls -lah release-assets/
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ needs.version.outputs.tag_name }}
+        files: release-assets/*
+        body: |
+          ## 📦 Binary Options
+          
+          | Variant | Description | Startup Time |
+          |---------|-------------|--------------|
+          | **Portable** (`*-portable`) | Single file, no installation needed | ~10 sec |
+          | **Fast** (`*-fast.tar.gz`) | Optimized for speed, extract and run | ~1 sec |
+          
+          Choose **Portable** for convenience, **Fast** for performance.
+        generate_release_notes: true
+        draft: false
+        prerelease: ${{ contains(needs.version.outputs.new_version, 'alpha') || contains(needs.version.outputs.new_version, 'beta') || contains(needs.version.outputs.new_version, 'rc') }}
+
+  smoke-pypi:
+    name: Smoke PyPI
+    needs: [version, publish]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v5
+    
+    - name: Wait for PyPI indexing
+      run: |
+        NAME="${{ github.event.repository.name }}"
+        VERSION="${{ needs.version.outputs.pypi_version }}"
+        MAX_ATTEMPTS=40
+        SLEEP_SECONDS=15
+        
+        echo "Waiting for ${NAME}==${VERSION} to be available on PyPI..."
+        for i in $(seq 1 $MAX_ATTEMPTS); do
+          if curl -sf "https://pypi.org/pypi/${NAME}/${VERSION}/json" > /dev/null 2>&1; then
+            echo "Package available after $((i * SLEEP_SECONDS)) seconds"
+            exit 0
+          fi
+          echo "Attempt $i/$MAX_ATTEMPTS: Package not yet available, waiting ${SLEEP_SECONDS}s..."
+          sleep $SLEEP_SECONDS
+        done
+        echo "Timed out waiting for package after $((MAX_ATTEMPTS * SLEEP_SECONDS)) seconds"
+        exit 1
+    
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+    
+    - name: Install from PyPI
+      run: pip install ${{ github.event.repository.name }}==${{ needs.version.outputs.pypi_version }}
+    
+    - name: Run smoke tests
+      run: python tests/smoke.py ${{ github.event.repository.name }}
+
+  smoke-binary:
+    name: Smoke Binary (${{ matrix.os }})
+    needs: [build-portable, build-fast]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            artifact_suffix: linux-portable
+          - os: macos-latest
+            artifact_suffix: macos-portable
+          - os: windows-latest
+            artifact_suffix: windows-portable.exe
+    
+    steps:
+    - uses: actions/checkout@v5
+    
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+    
+    - name: Install package (for import tests)
+      run: make install
+    
+    - name: Download binary
+      uses: actions/download-artifact@v5
+      with:
+        name: ${{ github.event.repository.name }}-${{ matrix.artifact_suffix }}
+    
+    - name: Make executable
+      run: chmod +x ./${{ github.event.repository.name }}-${{ matrix.artifact_suffix }} || true
+      shell: bash
+    
+    - name: Run smoke tests
+      run: make smoke NAME=./${{ github.event.repository.name }}-${{ matrix.artifact_suffix }}
+
+  homebrew:
+    name: Update Homebrew
+    needs: [version, release]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v5
+    
+    - name: Generate and push formula
+      env:
+        GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      run: |
+        NAME="${{ github.event.repository.name }}"
+        TAG="${{ needs.version.outputs.tag_name }}"
+        REPO="${{ github.repository }}"
+        
+        # Get description from pyproject.toml
+        DESCRIPTION=$(grep '^description' pyproject.toml | sed 's/description = "\(.*\)"/\1/')
+        
+        # Calculate SHA256 of release tarball
+        TARBALL_URL="https://github.com/${REPO}/archive/refs/tags/${TAG}.tar.gz"
+        SHA256=$(curl -sL "$TARBALL_URL" | shasum -a 256 | cut -d' ' -f1)
+        
+        # Convert name to Ruby class name (capitalize, remove hyphens)
+        CLASS_NAME=$(echo "$NAME" | sed 's/-/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2))}1' | tr -d ' ')
+        
+        # Build source lines for release (url + sha256 + head)
+        SOURCE_LINE="url \"${TARBALL_URL}\"\n  sha256 \"${SHA256}\"\n  head \"https://github.com/${REPO}.git\", branch: \"master\""
+        
+        # Configure git credentials for GitHub using GITHUB_TOKEN
+        git config --global credential.helper store
+        git credential approve <<EOF
+        protocol=https
+        host=github.com
+        username=x-access-token
+        password=${GITHUB_TOKEN}
+        EOF
+        
+        # Clone homebrew-tap repo (preserves all existing formulas)
+        git clone https://github.com/${{ github.repository_owner }}/homebrew-tap.git tap-repo
+        cd tap-repo
+        
+        # Generate formula directly in repo root (no Formula subdirectory)
+        sed -e "s|{{NAME}}|${NAME}|g" \
+            -e "s|{{CLASS_NAME}}|${CLASS_NAME}|g" \
+            -e "s|{{DESCRIPTION}}|${DESCRIPTION}|g" \
+            -e "s|{{HOMEPAGE}}|https://github.com/${REPO}|g" \
+            -e "s|{{SOURCE_LINE}}|${SOURCE_LINE}|g" \
+            ../.github/templates/formula.rb.template > "${NAME}.rb"
+        
+        echo "Generated formula:"
+        cat "${NAME}.rb"
+        
+        # Commit and push
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git config user.name "github-actions[bot]"
+        git add "${NAME}.rb"
+        
+        if git diff --cached --quiet; then
+          echo "No changes to commit for ${NAME}.rb"
+        else
+          git commit -m "Update ${NAME} to ${TAG}"
+        fi
+        
+        # Only push if there are new commits compared to origin/master
+        if git log origin/master..HEAD --oneline | grep -q '.'; then
+          git push origin master
+        else
+          echo "No new commits to push"
+        fi
+
+  smoke-homebrew:
+    name: Smoke Homebrew
+    needs: [version, homebrew]
+    runs-on: macos-latest
+    
+    steps:
+    - name: Tap and install formula
+      run: |
+        brew tap ${{ github.repository_owner }}/tap
+        brew install ${{ github.repository_owner }}/tap/${{ github.event.repository.name }}
+    
+    - name: Run formula test
+      run: brew test ${{ github.event.repository.name }}
+    
+    - name: Verify CLI works
+      run: |
+        ${{ github.event.repository.name }} version
+        ${{ github.event.repository.name }} --help
