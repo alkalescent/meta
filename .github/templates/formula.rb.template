@@ -8,10 +8,9 @@ class {{CLASS_NAME}} < Formula
   
   def install
     system "make", "build", "MODE=standalone", "CI=true"
-    bin.install "cli.dist/{{NAME}}"
-    # Move the dist contents to libexec to avoid polluting bin
+    # Install the whole dist dir (binary + its support files) into libexec
+    # to avoid polluting bin, then symlink just the binary into bin.
     libexec.install Dir["cli.dist/*"]
-    # Create symlink from bin to libexec
     bin.install_symlink libexec/"{{NAME}}"
   end
 
