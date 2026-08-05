@@ -78,12 +78,14 @@ make smoke
 
 - `detect.py`: Project detection logic
 - `deps.py`: Dependency parsing
+- `pep440.py`: Version parsing and specifier matching
 - `scripts.py`: Script extraction
 - `env.py`: Environment variable scanning
 - `size.py`: Size calculation
 - `contributors.py`: Git contributor analysis
 - `health.py`: Health checks
 - `output.py`: Output formatting
+- `walk.py`: Shared traversal settings
 - `cli.py`: Command-line interface
 
 ## 📄 License

@@ -10,9 +10,12 @@ import re
 import subprocess
 import tomllib
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+
+from meta_one import pep440
 
 
 @dataclass
@@ -59,6 +62,94 @@ def _dev_dependency_names(pyproject: Path) -> set[str]:
         if match:
             names.add(_normalize_pkg_name(match.group(1)))
     return names
+
+
+def _uv_lock_closure(by_name: dict[str, dict], roots: list[dict]) -> set[str]:
+    """Collect every package reachable from a set of root dependencies.
+
+    Args:
+        by_name: Locked packages keyed by normalized name.
+        roots: Dependency entries, each carrying a "name".
+
+    Returns:
+        Set of normalized package names in the closure.
+    """
+    seen: set[str] = set()
+    queue = [_normalize_pkg_name(r["name"]) for r in roots if r.get("name")]
+    while queue:
+        name = queue.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        package = by_name.get(name)
+        if not package:
+            continue
+        for edge in package.get("dependencies", []):
+            child = _normalize_pkg_name(edge.get("name", ""))
+            if child and child not in seen:
+                queue.append(child)
+    return seen
+
+
+def _parse_uv_lock(uv_lock: Path) -> DepsResult | None:
+    """Split a uv.lock into production and dev dependencies by graph reachability.
+
+    A package counts as dev only when it is reachable from a dev group and not
+    from the production roots, so shared transitive dependencies stay in
+    production.
+
+    Args:
+        uv_lock: Path to uv.lock.
+
+    Returns:
+        DepsResult, or None if the lockfile has no root project entry to walk
+        from, in which case the caller falls back to name matching.
+    """
+    try:
+        data = tomllib.loads(uv_lock.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    packages = [p for p in data.get("package", []) if p.get("name")]
+    if not packages:
+        return None
+
+    root = next(
+        (
+            p
+            for p in packages
+            if "metadata" in p or {"editable", "virtual"} & set(p.get("source", {}))
+        ),
+        None,
+    )
+    if root is None:
+        return None
+
+    by_name = {_normalize_pkg_name(p["name"]): p for p in packages}
+
+    prod_roots = list(root.get("dependencies", []))
+    for group in root.get("optional-dependencies", {}).values():
+        prod_roots.extend(group)
+    dev_roots: list[dict] = []
+    for group in root.get("dev-dependencies", {}).values():
+        dev_roots.extend(group)
+
+    production_names = _uv_lock_closure(by_name, prod_roots)
+    dev_names = _uv_lock_closure(by_name, dev_roots) - production_names
+
+    root_name = _normalize_pkg_name(root["name"])
+    production: list[Dependency] = []
+    dev: list[Dependency] = []
+    for package in packages:
+        normalized = _normalize_pkg_name(package["name"])
+        if normalized == root_name:
+            continue
+        dependency = Dependency(
+            package["name"], package.get("version", ""), normalized in dev_names
+        )
+        (dev if dependency.is_dev else production).append(dependency)
+
+    return DepsResult(production, dev, "Python")
 
 
 def analyze_deps(root: Path) -> DepsResult:
@@ -192,6 +283,11 @@ def _parse_python(root: Path) -> DepsResult:
     pyproject = root / "pyproject.toml"
 
     if uv_lock.exists():
+        graphed = _parse_uv_lock(uv_lock)
+        if graphed is not None:
+            return graphed
+        # Lockfile with no root project entry (or unparseable TOML): fall back
+        # to matching names declared under [dependency-groups].dev.
         try:
             content = uv_lock.read_text(encoding="utf-8")
             matches = re.finditer(
@@ -359,17 +455,46 @@ def _check_outdated_pypi(
     """Check outdated Python dependencies via the PyPI JSON API."""
     outdated: list[OutdatedDependency] = []
     for dep in [*data.production, *data.dev]:
+        name = urllib.parse.quote(dep.name, safe="")
         try:
             with urllib.request.urlopen(
-                f"https://pypi.org/pypi/{dep.name}/json", timeout=5
+                f"https://pypi.org/pypi/{name}/json", timeout=5
             ) as resp:
                 info = json.loads(resp.read())
             latest = info.get("info", {}).get("version", "")
-            if latest and latest != dep.version:
-                outdated.append(OutdatedDependency(dep.name, dep.version, latest))
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
             continue
+
+        recorded = dep.version.strip()
+        if not latest or not recorded:
+            continue
+        if _is_outdated(recorded, latest):
+            outdated.append(OutdatedDependency(dep.name, recorded, latest))
     return outdated, None
+
+
+def _is_outdated(recorded: str, latest: str) -> bool:
+    """Decide whether a recorded version or constraint is behind the latest release.
+
+    A constraint (e.g. ">=0.20.1") is outdated only when the latest release
+    fails to satisfy it. A plain version is outdated only when the latest
+    release sorts strictly higher, so a lockfile ahead of PyPI isn't flagged.
+
+    Args:
+        recorded: Version or specifier recorded for the dependency.
+        latest: Latest version published on PyPI.
+
+    Returns:
+        bool: True if the dependency should be reported as outdated.
+    """
+    if pep440.is_specifier(recorded):
+        return not pep440.satisfies(latest, recorded)
+
+    current = pep440.parse_version(recorded)
+    newest = pep440.parse_version(latest)
+    if current is None or newest is None:
+        return latest != recorded
+    return newest.key > current.key
 
 
 def _check_outdated_cargo(root: Path) -> tuple[list[OutdatedDependency], str | None]:

@@ -59,17 +59,14 @@ jobs:
       url: https://pypi.org/p/meta.one
     
     steps:
+    # Check out the tag the version job just created, not the branch head. A
+    # commit landing on master in between would give hatch-vcs a .dev version
+    # and publish something nobody asked for.
     - uses: actions/checkout@v5
       with:
-        ref: master
+        ref: ${{ needs.version.outputs.tag_name }}
         fetch-depth: 0
-    
-    - name: Pull latest and fetch tags
-      run: |
-        git pull origin master
-        git fetch --tags
-        echo "Latest tag: $(git describe --tags --abbrev=0)"
-    
+
     - name: Set up Python
       uses: actions/setup-python@v6
       with:
@@ -105,13 +102,12 @@ jobs:
             binary_name: .exe
     
     steps:
+    # Build from the tagged commit so hatch-vcs stamps the release version.
     - uses: actions/checkout@v5
       with:
-        ref: master
-    
-    - name: Pull latest changes
-      run: git pull origin master
-    
+        ref: ${{ needs.version.outputs.tag_name }}
+        fetch-depth: 0
+
     - name: Set up Python
       uses: actions/setup-python@v6
       with:
@@ -156,13 +152,12 @@ jobs:
             platform: windows
     
     steps:
+    # Build from the tagged commit so hatch-vcs stamps the release version.
     - uses: actions/checkout@v5
       with:
-        ref: master
-    
-    - name: Pull latest changes
-      run: git pull origin master
-    
+        ref: ${{ needs.version.outputs.tag_name }}
+        fetch-depth: 0
+
     - name: Set up Python
       uses: actions/setup-python@v6
       with:
@@ -197,8 +192,8 @@ jobs:
     steps:
     - uses: actions/checkout@v5
       with:
-        ref: master
-    
+        ref: ${{ needs.version.outputs.tag_name }}
+
     - name: Download all artifacts
       uses: actions/download-artifact@v5
       with:

@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from meta_one.walk import SKIP_DIRS
+
 
 @dataclass
 class EnvVar:
@@ -77,17 +79,6 @@ def _find_env_usages(root: Path, keys: set[str]) -> dict[str, list[str]]:
     if not keys:
         return usages
 
-    skip_dirs = {
-        "node_modules",
-        ".git",
-        "dist",
-        "build",
-        ".venv",
-        "__pycache__",
-        "venv",
-        "env",
-    }
-
     # Patterns for different languages
     # Group 1 matches the key
     patterns = [
@@ -101,7 +92,7 @@ def _find_env_usages(root: Path, keys: set[str]) -> dict[str, list[str]]:
 
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [
-            d for d in dirnames if d not in skip_dirs and not d.startswith(".")
+            d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")
         ]
         for filename in filenames:
             # Skip likely binary or non-source files

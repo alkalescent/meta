@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+
+from meta_one.walk import SKIP_DIRS
 
 
 @dataclass
@@ -97,6 +102,38 @@ def _detect_node_language(root: Path) -> str:
     return "JavaScript"
 
 
+def _declared_python_deps(pyproject_path: Path) -> set[str]:
+    """Collect declared dependency names from a pyproject.toml.
+
+    Covers [project].dependencies, [project.optional-dependencies], and
+    [dependency-groups]. Names only, so a framework mentioned in a comment or
+    description isn't mistaken for a dependency.
+
+    Args:
+        pyproject_path: Path to pyproject.toml.
+
+    Returns:
+        Set of lowercased dependency names.
+    """
+    try:
+        data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return set()
+
+    specs: list[str] = list(data.get("project", {}).get("dependencies", []))
+    for group in data.get("project", {}).get("optional-dependencies", {}).values():
+        specs.extend(group)
+    for group in data.get("dependency-groups", {}).values():
+        specs.extend(s for s in group if isinstance(s, str))
+
+    names: set[str] = set()
+    for spec in specs:
+        match = re.match(r"^\s*([A-Za-z0-9._-]+)", spec)
+        if match:
+            names.add(match.group(1).lower())
+    return names
+
+
 def _detect_python_framework(root: Path) -> str:
     """Detect Python framework from pyproject.toml dependencies.
 
@@ -109,13 +146,10 @@ def _detect_python_framework(root: Path) -> str:
     pyproject_path = root / "pyproject.toml"
     if not pyproject_path.exists():
         return ""
-    try:
-        content = pyproject_path.read_text()
-        for dep_name, framework in PYTHON_FRAMEWORKS.items():
-            if dep_name in content.lower():
-                return framework
-    except OSError:
-        pass
+    declared = _declared_python_deps(pyproject_path)
+    for dep_name, framework in PYTHON_FRAMEWORKS.items():
+        if dep_name in declared:
+            return framework
     return ""
 
 
@@ -128,15 +162,20 @@ def _detect_csproj(root: Path) -> ProjectInfo | None:
     Returns:
         ProjectInfo if .NET project detected, else None.
     """
-    csproj_files = list(root.glob("*.csproj")) + list(root.glob("**/*.csproj"))
-    sln_files = list(root.glob("*.sln"))
-    if csproj_files or sln_files:
-        marker = str(csproj_files[0].name) if csproj_files else str(sln_files[0].name)
-        return ProjectInfo(
-            project_type=".NET",
-            language="C#",
-            marker_file=marker,
-        )
+    marker = ""
+    for _dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")
+        ]
+        for filename in filenames:
+            if filename.endswith(".csproj"):
+                return ProjectInfo(
+                    project_type=".NET", language="C#", marker_file=filename
+                )
+            if not marker and filename.endswith(".sln"):
+                marker = filename
+    if marker:
+        return ProjectInfo(project_type=".NET", language="C#", marker_file=marker)
     return None
 
 
@@ -170,35 +209,3 @@ def detect_project_type(root: Path) -> ProjectInfo:
         return dotnet
 
     return ProjectInfo(project_type="Unknown")
-
-
-def detect_all_project_types(root: Path) -> list[ProjectInfo]:
-    """Detect all project types present in the directory.
-
-    Args:
-        root: Directory to scan.
-
-    Returns:
-        List of all detected ProjectInfo objects.
-    """
-    results: list[ProjectInfo] = []
-    for marker_file, (project_type, language) in MARKER_MAP.items():
-        if (root / marker_file).exists():
-            framework = ""
-            if project_type == "Node.js":
-                framework = _detect_node_framework(root)
-                language = _detect_node_language(root)
-            elif project_type == "Python":
-                framework = _detect_python_framework(root)
-            results.append(
-                ProjectInfo(
-                    project_type=project_type,
-                    framework=framework,
-                    language=language,
-                    marker_file=marker_file,
-                )
-            )
-    dotnet = _detect_csproj(root)
-    if dotnet:
-        results.append(dotnet)
-    return results

@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass
 from typing import Any
+
+# Matches a complete SGR sequence, and a trailing unterminated one, so a
+# truncated escape can't derail width measurement.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m?")
 
 # Status symbols
 SYMBOL_OK = "✓"
@@ -73,6 +78,18 @@ def style(
     return f"\033[{';'.join(codes)}m{text}\033[0m"
 
 
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from a string.
+
+    Args:
+        text: Text that may contain SGR escape sequences.
+
+    Returns:
+        The text with escape sequences removed.
+    """
+    return _ANSI_RE.sub("", text)
+
+
 def format_table(rows: list[list[str]], padding: int = 2) -> str:
     """Render rows as an aligned table.
 
@@ -88,24 +105,15 @@ def format_table(rows: list[list[str]], padding: int = 2) -> str:
     col_widths = [0] * max(len(r) for r in rows)
     for row in rows:
         for i, cell in enumerate(row):
-            # Strip ANSI codes for width calculation
-            clean = cell
-            while "\033[" in clean:
-                start = clean.index("\033[")
-                end = clean.index("m", start) + 1
-                clean = clean[:start] + clean[end:]
-            col_widths[i] = max(col_widths[i], len(clean))
+            # Measure without ANSI codes so colored cells still align.
+            col_widths[i] = max(col_widths[i], len(strip_ansi(cell)))
 
     lines: list[str] = []
     for row in rows:
         parts: list[str] = []
         for i, cell in enumerate(row):
-            clean = cell
-            while "\033[" in clean:
-                start = clean.index("\033[")
-                end = clean.index("m", start) + 1
-                clean = clean[:start] + clean[end:]
-            pad = col_widths[i] - len(clean) + padding if i < len(row) - 1 else 0
+            width = len(strip_ansi(cell))
+            pad = col_widths[i] - width + padding if i < len(row) - 1 else 0
             parts.append(cell + " " * pad)
         lines.append("".join(parts).rstrip())
     return "\n".join(lines)

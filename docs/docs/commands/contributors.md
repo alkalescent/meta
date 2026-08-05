@@ -13,7 +13,17 @@ meta contributors
 ```text
 Krish Suchak   42 commits
 Alice          8 commits
+
+Recently Active Files (last 30 days):
+src/meta_one/cli.py     6 commits   2 authors
+src/meta_one/deps.py    4 commits   1 authors
+
+Churn Hotspots:
+README.md               18 commits
+src/meta_one/cli.py     12 commits
 ```
+
+Alongside the per-author summary, the command lists the ten files touched most in the last 30 days and the ten with the highest all-time commit count.
 
 ## Flags
 

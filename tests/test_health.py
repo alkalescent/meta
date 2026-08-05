@@ -5,7 +5,11 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from conftest import requires_git
+
 from meta_one.health import run_health_checks
+
+pytestmark = requires_git
 
 
 def _init_git(root: Path) -> None:
@@ -145,6 +149,31 @@ def test_health_secrets_detected(tmp_path: Path) -> None:
     _commit_all(tmp_path, "add config")
     checks = run_health_checks(tmp_path)
     assert _statuses(checks, "Secrets detected in tracked files") == "fail"
+
+
+def test_health_secrets_report_names_file_and_pattern(tmp_path: Path) -> None:
+    """Test a hit identifies which file matched which rule."""
+    _init_git(tmp_path)
+    (tmp_path / "config.py").write_text('AWS_KEY = "AKIAABCDEFGHIJKLMNOP"\n')
+    _commit_all(tmp_path, "add config")
+    checks = run_health_checks(tmp_path)
+    message = next(
+        c.message for c in checks if c.message.startswith("Secrets detected")
+    )
+    assert "config.py" in message
+    assert "aws-access-key-id" in message
+
+
+def test_health_secrets_skips_test_files(tmp_path: Path) -> None:
+    """Test fixture credentials in test files don't trip the scan."""
+    _init_git(tmp_path)
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_scanner.py").write_text('KEY = "AKIAABCDEFGHIJKLMNOP"\n')
+    (tmp_path / "app.spec.js").write_text('const password = "hunter2hunter2";\n')
+    _commit_all(tmp_path, "add tests")
+    checks = run_health_checks(tmp_path)
+    assert _statuses(checks, "No secrets detected in tracked files") == "ok"
 
 
 def test_health_no_secrets(tmp_path: Path) -> None:

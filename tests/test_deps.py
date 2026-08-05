@@ -7,14 +7,56 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from meta_one.deps import (
     Dependency,
     DepsResult,
     _dev_dependency_names,
+    _is_outdated,
     _normalize_pkg_name,
     analyze_deps,
     check_outdated,
 )
+
+# A uv.lock with a root project entry, so the graph walk applies. "shared" is
+# reachable from both roots and must stay in production.
+_UV_LOCK_WITH_ROOT = """
+version = 1
+
+[[package]]
+name = "app"
+source = { editable = "." }
+dependencies = [{ name = "fastapi" }]
+
+[package.dev-dependencies]
+dev = [{ name = "pytest" }]
+
+[package.metadata]
+requires-dist = [{ name = "fastapi" }]
+
+[[package]]
+name = "fastapi"
+version = "0.100.0"
+dependencies = [{ name = "starlette" }, { name = "shared" }]
+
+[[package]]
+name = "starlette"
+version = "0.27.0"
+
+[[package]]
+name = "pytest"
+version = "7.4.0"
+dependencies = [{ name = "pluggy" }, { name = "shared" }]
+
+[[package]]
+name = "pluggy"
+version = "1.3.0"
+
+[[package]]
+name = "shared"
+version = "1.0.0"
+"""
 
 
 def test_analyze_deps_node(tmp_node_project: Path) -> None:
@@ -210,6 +252,31 @@ def test_parse_python_uv_lock_dev_split(tmp_path: Path) -> None:
     assert all(not d.is_dev for d in deps.production)
 
 
+def test_parse_python_uv_lock_graph_split(tmp_path: Path) -> None:
+    """Test transitive dev dependencies are classified as dev, not production."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "app"\ndependencies = ["fastapi"]\n\n'
+        '[dependency-groups]\ndev = ["pytest"]\n'
+    )
+    (tmp_path / "uv.lock").write_text(_UV_LOCK_WITH_ROOT)
+    deps = analyze_deps(tmp_path)
+
+    # pluggy reaches the tree only through pytest, so it is dev.
+    assert {d.name for d in deps.dev} == {"pytest", "pluggy"}
+    # shared is reachable from both roots, so production wins.
+    assert {d.name for d in deps.production} == {"fastapi", "starlette", "shared"}
+    assert all(d.is_dev for d in deps.dev)
+    assert all(not d.is_dev for d in deps.production)
+
+
+def test_parse_python_uv_lock_excludes_root_project(tmp_path: Path) -> None:
+    """Test the project itself isn't listed as one of its own dependencies."""
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "app"\n')
+    (tmp_path / "uv.lock").write_text(_UV_LOCK_WITH_ROOT)
+    deps = analyze_deps(tmp_path)
+    assert "app" not in {d.name for d in [*deps.production, *deps.dev]}
+
+
 def test_parse_python_pyproject_fallback(tmp_path: Path) -> None:
     """Test pyproject.toml fallback when no uv.lock is present."""
     (tmp_path / "pyproject.toml").write_text(
@@ -389,6 +456,48 @@ def test_check_outdated_pypi(tmp_path: Path) -> None:
     assert note is None
     assert outdated[0].name == "requests"
     assert outdated[0].latest == "2.31.0"
+
+
+def test_check_outdated_pypi_satisfied_specifier(tmp_path: Path) -> None:
+    """Test a constraint the latest release satisfies isn't reported outdated."""
+    data = DepsResult(
+        production=[Dependency("typer", ">=0.20.1", False)], dev=[], ecosystem="Python"
+    )
+
+    class FakeResponse:
+        def __enter__(self) -> FakeResponse:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps({"info": {"version": "0.27.1"}}).encode()
+
+    with patch("meta_one.deps.urllib.request.urlopen", return_value=FakeResponse()):
+        outdated, note = check_outdated(tmp_path, data)
+    assert outdated == []
+    assert note is None
+
+
+@pytest.mark.parametrize(
+    ("recorded", "latest", "expected"),
+    [
+        (">=0.20.1", "0.27.1", False),
+        (">=0.20.1", "0.19.0", True),
+        ("==2.32.3", "2.34.2", True),
+        ("~=1.4.2", "1.4.9", False),
+        ("~=1.4.2", "1.5.0", True),
+        (">=1.0,<2.0", "2.1", True),
+        ("2.32.3", "2.34.2", True),
+        ("2.34.2", "2.32.3", False),
+        ("2.32.3", "2.32.3", False),
+        ("weird-version", "2.0", True),
+    ],
+)
+def test_is_outdated(recorded: str, latest: str, expected: bool) -> None:
+    """Test constraints are satisfy-checked and plain versions compared by order."""
+    assert _is_outdated(recorded, latest) is expected
 
 
 def test_check_outdated_pypi_network_error(tmp_path: Path) -> None:

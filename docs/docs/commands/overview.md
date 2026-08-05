@@ -12,16 +12,18 @@ meta
 
 ```text
 Project:     meta
-Type:        Python
+Type:        Python (Typer CLI)
 Language:    Python (82%)
 Size:        43 files, 23800 lines
-Deps:        14 dependencies, 8 dev
+Deps:        9 dependencies, 13 dev
 Scripts:     13 runnable
 Env:         0 expected, 0 missing
 Git:         master branch, 0 uncommitted changes
 Last commit: 2 hours ago by Krish Suchak
 Health:      ✓ 0 issues found
 ```
+
+The Type line names the detected framework in parentheses when one is found, e.g. `Node.js (Next.js)` or `Python (Django)`.
 
 ## Flags
 
@@ -35,12 +37,13 @@ meta --json
 {
   "project": "meta",
   "type": "Python",
+  "framework": "Typer CLI",
   "language": "Python",
   "language_percentage": 82.1,
   "files": 43,
   "lines": 23800,
-  "dependencies": 14,
-  "dev_dependencies": 8,
+  "dependencies": 9,
+  "dev_dependencies": 13,
   "scripts": 13,
   "env_expected": 0,
   "env_missing": 0,
