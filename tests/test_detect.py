@@ -8,7 +8,6 @@ from pathlib import Path
 from meta_one.detect import (
     _detect_node_framework,
     _detect_python_framework,
-    detect_all_project_types,
     detect_project_type,
 )
 
@@ -93,15 +92,39 @@ def test_detect_dotnet_sln_only(tmp_path: Path) -> None:
     assert info.marker_file == "App.sln"
 
 
-def test_detect_all_project_types(tmp_python_project: Path) -> None:
-    """Test detecting all project types, including a .NET marker alongside others."""
-    (tmp_python_project / "App.csproj").write_text("<Project />")
-    infos = detect_all_project_types(tmp_python_project)
-    types = {info.project_type for info in infos}
-    assert "Python" in types
-    assert ".NET" in types
+def test_detect_dotnet_nested_csproj(tmp_path: Path) -> None:
+    """Test a .csproj in a subdirectory is found."""
+    nested = tmp_path / "src" / "App"
+    nested.mkdir(parents=True)
+    (nested / "App.csproj").write_text("<Project />")
+    info = detect_project_type(tmp_path)
+    assert info.project_type == ".NET"
+    assert info.marker_file == "App.csproj"
 
 
-def test_detect_all_project_types_empty(tmp_empty_project: Path) -> None:
-    """Test detecting all project types in an empty project returns nothing."""
-    assert detect_all_project_types(tmp_empty_project) == []
+def test_detect_dotnet_skips_vendored_dirs(tmp_path: Path) -> None:
+    """Test the .NET walk doesn't descend into vendored or dot directories."""
+    vendored = tmp_path / "node_modules" / "pkg"
+    vendored.mkdir(parents=True)
+    (vendored / "Vendored.csproj").write_text("<Project />")
+    assert detect_project_type(tmp_path).project_type == "Unknown"
+
+
+def test_detect_python_framework_ignores_comments(tmp_path: Path) -> None:
+    """Test a framework named only in a comment isn't reported as a dependency."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "app"\n# we deliberately do not use django here\n'
+        "dependencies = []\n"
+    )
+    info = detect_project_type(tmp_path)
+    assert info.project_type == "Python"
+    assert info.framework == ""
+
+
+def test_detect_python_framework_from_optional_group(tmp_path: Path) -> None:
+    """Test frameworks declared in optional-dependencies are detected."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "app"\ndependencies = []\n\n'
+        '[project.optional-dependencies]\nweb = ["flask>=3.0"]\n'
+    )
+    assert detect_project_type(tmp_path).framework == "Flask"

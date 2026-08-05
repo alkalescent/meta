@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -83,6 +84,41 @@ def test_overview_git_failure(tmp_empty_project: Path) -> None:
     result = runner.invoke(app, ["--path", str(tmp_empty_project)])
     assert result.exit_code == 0
     assert "unknown" in result.stdout
+
+
+def test_overview_git_not_installed(tmp_empty_project: Path) -> None:
+    """Test overview survives git being absent from PATH.
+
+    FileNotFoundError is an OSError rather than a SubprocessError, so catching
+    only the latter used to surface a traceback to the user.
+    """
+    with patch(
+        "meta_one.cli.subprocess.check_output", side_effect=FileNotFoundError("git")
+    ):
+        result = runner.invoke(app, ["--path", str(tmp_empty_project)])
+    assert result.exit_code == 0
+    assert result.exception is None
+    assert "unknown" in result.stdout
+
+
+def test_overview_shows_framework(tmp_path: Path) -> None:
+    """Test a detected framework is shown alongside the project type."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "app"\ndependencies = ["fastapi"]\n'
+    )
+    result = runner.invoke(app, ["--path", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "Type:        Python (FastAPI)" in result.stdout
+
+
+def test_overview_json_includes_framework(tmp_path: Path) -> None:
+    """Test the framework is present in JSON overview output."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "app"\ndependencies = ["flask"]\n'
+    )
+    result = runner.invoke(app, ["--json", "--path", str(tmp_path)])
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["framework"] == "Flask"
 
 
 # --- deps ---
@@ -386,6 +422,53 @@ def test_contributors_command() -> None:
         assert "5 commits" in result.stdout
 
 
+def test_contributors_shows_recent_files_and_churn() -> None:
+    """Test the recent-files and churn data the analyzer computes is displayed."""
+    with patch("meta_one.cli.analyze_contributors") as mock_analyze:
+        from meta_one.contributors import (
+            ChurnFile,
+            Contributor,
+            ContributorsResult,
+            RecentFile,
+        )
+
+        mock_analyze.return_value = ContributorsResult(
+            contributors=[Contributor("Alice", 5, 10, 2, "2 days ago")],
+            recent_files=[RecentFile("src/app.py", 4, 2)],
+            churn_hotspots=[ChurnFile("src/legacy.py", 42)],
+        )
+        result = runner.invoke(app, ["contributors"])
+        assert result.exit_code == 0
+        assert "Recently Active Files" in result.stdout
+        assert "src/app.py" in result.stdout
+        assert "2 authors" in result.stdout
+        assert "Churn Hotspots" in result.stdout
+        assert "src/legacy.py" in result.stdout
+        assert "42 commits" in result.stdout
+
+
+def test_contributors_json_includes_recent_and_churn() -> None:
+    """Test JSON output carries the recent-files and churn sections."""
+    with patch("meta_one.cli.analyze_contributors") as mock_analyze:
+        from meta_one.contributors import (
+            ChurnFile,
+            Contributor,
+            ContributorsResult,
+            RecentFile,
+        )
+
+        mock_analyze.return_value = ContributorsResult(
+            contributors=[Contributor("Alice", 5, 10, 2, "2 days ago")],
+            recent_files=[RecentFile("src/app.py", 4, 2)],
+            churn_hotspots=[ChurnFile("src/legacy.py", 42)],
+        )
+        result = runner.invoke(app, ["--json", "contributors"])
+        assert result.exit_code == 0
+        payload = json.loads(result.stdout)
+        assert payload["recent_files"][0]["path"] == "src/app.py"
+        assert payload["churn_hotspots"][0]["commits"] == 42
+
+
 def test_contributors_quiet() -> None:
     """Test contributors --quiet prints only a summary count."""
     with patch("meta_one.cli.analyze_contributors") as mock_analyze:
@@ -399,6 +482,38 @@ def test_contributors_quiet() -> None:
         result = runner.invoke(app, ["--quiet", "contributors"])
         assert result.exit_code == 0
         assert result.stdout.strip() == "1 contributors"
+
+
+def test_health_symbols_colored_when_supported() -> None:
+    """Test health symbols carry color when the terminal supports it."""
+    with (
+        patch("meta_one.cli.run_health_checks") as mock_checks,
+        patch("meta_one.output._supports_color", return_value=True),
+    ):
+        mock_checks.return_value = [
+            HealthCheck("ok", "Lock file present"),
+            HealthCheck("optional", "No environment example file found"),
+            HealthCheck("fail", "README.md not found"),
+        ]
+        # color=True keeps click from stripping ANSI on a non-tty stream.
+        result = runner.invoke(app, ["health"], color=True)
+        assert result.exit_code == 0
+        assert "\033[32m" in result.stdout
+        assert "\033[31m" in result.stdout
+        assert "○" in result.stdout
+
+
+def test_health_symbols_plain_with_no_color() -> None:
+    """Test --no-color suppresses color even where the terminal supports it."""
+    with (
+        patch("meta_one.cli.run_health_checks") as mock_checks,
+        patch("meta_one.output._supports_color", return_value=True),
+    ):
+        mock_checks.return_value = [HealthCheck("ok", "Lock file present")]
+        result = runner.invoke(app, ["--no-color", "health"], color=True)
+        assert result.exit_code == 0
+        assert "\033[" not in result.stdout
+        assert "✓" in result.stdout
 
 
 def test_contributors_since_author_flags() -> None:
