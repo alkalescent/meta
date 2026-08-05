@@ -4,6 +4,7 @@ class {{CLASS_NAME}} < Formula
   {{SOURCE_LINE}}
   
   depends_on "python@3.13"
+  depends_on "uv"
   
   def install
     system "make", "build", "MODE=standalone", "CI=true"
