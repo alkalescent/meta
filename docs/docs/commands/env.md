@@ -1,4 +1,8 @@
-# env
+---
+title: 🔐 env
+---
+
+# 🔐 env
 
 Parse `.env.example` / `.env.sample` / `.env.template` for expected environment variables, then check whether each is set in `.env` or the shell environment, and scan source files for where each variable is actually used.
 

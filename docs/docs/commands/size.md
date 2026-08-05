@@ -1,4 +1,8 @@
-# size
+---
+title: 📏 size
+---
+
+# 📏 size
 
 Analyze codebase size: file and line counts by language, by directory, and the largest individual files. Respects `.gitignore` via `git ls-files` when run inside a git repository.
 

@@ -1,4 +1,8 @@
-# deps
+---
+title: 📦 deps
+---
+
+# 📦 deps
 
 List dependencies parsed from the project's manifest or lockfile.
 

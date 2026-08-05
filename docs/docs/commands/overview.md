@@ -1,4 +1,8 @@
-# Overview
+---
+title: 🧭 Overview
+---
+
+# 🧭 Overview
 
 Running `meta` with no subcommand prints a one-screen summary of the current project.
 

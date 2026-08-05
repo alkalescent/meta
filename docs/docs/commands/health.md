@@ -1,4 +1,8 @@
-# health
+---
+title: 🩺 health
+---
+
+# 🩺 health
 
 Run a set of repository health checks and report pass/warn/fail status for each.
 

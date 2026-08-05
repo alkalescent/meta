@@ -1,4 +1,8 @@
-# contributors
+---
+title: 👥 contributors
+---
+
+# 👥 contributors
 
 Summarize git contributor activity: commits, insertions, deletions, and last-active date per author, sourced from `git log`/`git shortlog`.
 
