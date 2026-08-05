@@ -5,7 +5,7 @@
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-meta is a zero-dependency (runtime uses only typer), offline-first CLI that drops into any codebase and instantly surfaces what it is, how it's structured, and what you need to know. No AI, no internet required, no configuration needed.
+meta is a minimal-dependency (runtime uses only typer), offline-first CLI that drops into any codebase and instantly surfaces what it is, how it's structured, and what you need to know. No magic, no internet required, no configuration needed.
 
 ## Installation
 
