@@ -6,7 +6,39 @@ from unittest.mock import patch
 
 import pytest
 
-from meta_one.output import Context, _supports_color, format_table, json_out, style
+from meta_one.output import (
+    Context,
+    _supports_color,
+    format_table,
+    json_out,
+    strip_ansi,
+    style,
+)
+
+
+def test_strip_ansi_removes_sgr_sequences() -> None:
+    """Test complete color sequences are removed."""
+    assert strip_ansi("\033[1;31mred\033[0m") == "red"
+
+
+def test_strip_ansi_tolerates_truncated_escape() -> None:
+    """Test an escape with no terminating 'm' doesn't raise."""
+    assert strip_ansi("\033[31") == ""
+    assert strip_ansi("a\033[31") == "a"
+
+
+def test_format_table_with_truncated_escape() -> None:
+    """Test a cell holding a truncated escape formats instead of raising."""
+    rendered = format_table([["\033[31", "value"], ["plain", "other"]])
+    assert "value" in rendered
+    assert "other" in rendered
+
+
+def test_format_table_aligns_colored_cells() -> None:
+    """Test color codes don't count toward column width."""
+    rendered = format_table([["\033[32m✓\033[0m", "ok"], ["✗", "bad"]])
+    first, second = (strip_ansi(line) for line in rendered.splitlines())
+    assert first.index("ok") == second.index("bad")
 
 
 def test_style_no_color_context() -> None:

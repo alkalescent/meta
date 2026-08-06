@@ -3,10 +3,23 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+
+# Applied by git-dependent test modules so the suite skips rather than errors
+# where git isn't installed.
+requires_git = pytest.mark.skipif(
+    shutil.which("git") is None, reason="git is not installed"
+)
+
+
+def require_git() -> None:
+    """Skip the calling test when git isn't on PATH."""
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed")
 
 
 @pytest.fixture
@@ -75,6 +88,7 @@ def tmp_node_project(tmp_path: Path) -> Path:
     (lib / "auth.ts").write_text("console.log(process.env.NEXTAUTH_SECRET);")
 
     # Git repo
+    require_git()
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(
@@ -138,6 +152,7 @@ def tmp_python_project(tmp_path: Path) -> Path:
     src.mkdir()
     (src / "app.py").write_text('import os\nprint(os.environ["SECRET_KEY"])')
 
+    require_git()
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
 
     return tmp_path

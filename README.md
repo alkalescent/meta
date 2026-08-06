@@ -5,9 +5,18 @@
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-meta is a zero-dependency (runtime uses only typer), offline-first CLI that drops into any codebase and instantly surfaces what it is, how it's structured, and what you need to know. No AI, no internet required, no configuration needed.
+meta is a minimal-dependency (runtime uses only typer), offline-first CLI that drops into any codebase and instantly surfaces what it is, how it's structured, and what you need to know. No magic, no internet required, no configuration needed.
 
-## Installation
+## ✨ Features
+
+- **Instant Detection**: Project type, framework, and language from marker files — no configuration needed
+- **Dependency Visibility**: Production and dev dependencies across Node.js, Python, Rust, Go, Ruby, and PHP
+- **Script Discovery**: Runnable scripts from package.json, Makefile, justfile, Taskfile.yml, and pyproject.toml
+- **Environment Awareness**: Expected vs. set environment variables, with source usage locations
+- **Health Checks**: Missing lockfiles, stale READMEs, leaked secrets, missing CI config
+- **Multi-Platform**: PyPI, Homebrew, and pre-built binary distribution
+
+## 📦 Installation
 
 ### Homebrew
 ```bash
@@ -29,14 +38,14 @@ make install DEV=1
 ### Pre-built Binaries
 Download from GitHub Releases for portable or fast execution options.
 
-## Quick Start
+## 🚀 Quick Start
 
 ```bash
 meta
 ```
 (Example output surfaces project details like structure and dependencies)
 
-## Commands
+## 🛠️ Commands
 
 - `deps`: List dependencies. `meta deps`
 - `scripts`: List defined scripts. `meta scripts`
@@ -45,7 +54,7 @@ meta
 - `contributors`: List top contributors. `meta contributors`
 - `health`: Check project health and metrics. `meta health`
 
-## Global Flags
+## ⚙️ Global Flags
 
 | Flag | Description |
 |---|---|
@@ -56,7 +65,7 @@ meta
 | `--version` | Show version |
 | `--help` | Show help message |
 
-## Testing
+## 🧪 Testing
 
 Run tests locally:
 ```bash
@@ -65,43 +74,20 @@ make cov
 make smoke
 ```
 
-## Architecture
+## 🏗️ Architecture
 
 - `detect.py`: Project detection logic
 - `deps.py`: Dependency parsing
+- `pep440.py`: Version parsing and specifier matching
 - `scripts.py`: Script extraction
 - `env.py`: Environment variable scanning
 - `size.py`: Size calculation
 - `contributors.py`: Git contributor analysis
 - `health.py`: Health checks
 - `output.py`: Output formatting
+- `walk.py`: Shared traversal settings
 - `cli.py`: Command-line interface
 
-## Support
-
-<table align="center">
-  <tr>
-    <th>Currency</th>
-    <th>Address</th>
-  </tr>
-  <tr>
-    <td><strong>₿ BTC</strong></td>
-    <td><code>bc1qwn7ea6s8wqx66hl5rr2supk4kv7qtcxnlqcqfk</code></td>
-  </tr>
-  <tr>
-    <td><strong>Ξ ETH</strong></td>
-    <td><code>0x7cdB1861AC1B4385521a6e16dF198e7bc43fDE5f</code></td>
-  </tr>
-  <tr>
-    <td><strong>ɱ XMR</strong></td>
-    <td><code>463fMSWyDrk9DVQ8QCiAir8TQd4h3aRAiDGA8CKKjknGaip7cnHGmS7bQmxSiS2aYtE9tT31Zf7dSbK1wyVARNgA9pkzVxX</code></td>
-  </tr>
-  <tr>
-    <td><strong>◈ BNB</strong></td>
-    <td><code>0x7cdB1861AC1B4385521a6e16dF198e7bc43fDE5f</code></td>
-  </tr>
-</table>
-
-## License
+## 📄 License
 
 MIT

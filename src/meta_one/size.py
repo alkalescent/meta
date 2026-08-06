@@ -8,6 +8,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
+from meta_one.walk import SKIP_DIRS
+
 
 @dataclass
 class LanguageStats:
@@ -165,20 +167,10 @@ def _get_files_git(root: Path) -> list[str]:
 
 def _get_files_manual(root: Path) -> list[str]:
     """Walk directory manually, skipping common ignore dirs."""
-    skip_dirs = {
-        "node_modules",
-        ".git",
-        "dist",
-        "build",
-        ".venv",
-        "__pycache__",
-        "venv",
-        "env",
-    }
     files = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [
-            d for d in dirnames if d not in skip_dirs and not d.startswith(".")
+            d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")
         ]
         rel_dir = Path(dirpath).relative_to(root)
         for f in filenames:

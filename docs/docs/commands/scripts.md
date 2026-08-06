@@ -1,4 +1,8 @@
-# scripts
+---
+title: ⚙️ scripts
+---
+
+# ⚙️ scripts
 
 Discover runnable scripts across `package.json`, `Makefile`, `justfile`, `Taskfile.yml`, and `pyproject.toml` (`[tool.taskipy.tasks]` or `[project.scripts]`).
 

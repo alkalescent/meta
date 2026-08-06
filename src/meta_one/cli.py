@@ -18,10 +18,12 @@ from meta_one.health import run_health_checks
 from meta_one.output import (
     SYMBOL_FAIL,
     SYMBOL_OK,
+    SYMBOL_OPTIONAL,
     SYMBOL_WARN,
     Context,
     format_table,
     json_out,
+    style,
 )
 from meta_one.scripts import discover_scripts
 from meta_one.size import analyze_size
@@ -43,9 +45,33 @@ app = typer.Typer(invoke_without_command=True)
 _STATUS_SYMBOLS = {
     "ok": SYMBOL_OK,
     "warn": SYMBOL_WARN,
-    "optional": SYMBOL_WARN,
+    "optional": SYMBOL_OPTIONAL,
     "fail": SYMBOL_FAIL,
 }
+
+_STATUS_COLORS = {
+    "ok": "green",
+    "warn": "yellow",
+    "optional": "gray",
+    "fail": "red",
+}
+
+
+def _status_symbol(status: str, ctx: Context) -> str:
+    """Render a health status as a colored symbol.
+
+    Args:
+        status (str): One of "ok", "warn", "optional", or "fail".
+        ctx (Context): The application context, carrying the no-color flag.
+
+    Returns:
+        str: The symbol, colored when the terminal and flags allow.
+    """
+    return style(
+        _STATUS_SYMBOLS.get(status, SYMBOL_FAIL),
+        color=_STATUS_COLORS.get(status, "red"),
+        ctx=ctx,
+    )
 
 
 def get_version() -> str:
@@ -112,22 +138,28 @@ def _overview(ctx: Context) -> None:
     """
     target_path = Path(ctx.path)
     project_name = target_path.name
-    proj_type = detect_project_type(target_path).project_type
+    project_info = detect_project_type(target_path)
+    proj_type = project_info.project_type
+    type_line = (
+        f"{proj_type} ({project_info.framework})"
+        if project_info.framework
+        else proj_type
+    )
 
     size_data = analyze_size(target_path)
-    files = size_data.total_files if size_data else 0
-    lines = size_data.total_lines if size_data else 0
-    top_lang = size_data.languages[0] if size_data and size_data.languages else None
+    files = size_data.total_files
+    lines = size_data.total_lines
+    top_lang = size_data.languages[0] if size_data.languages else None
 
     deps_data = analyze_deps(target_path)
-    deps_count = len(deps_data.production) if deps_data else 0
-    dev_count = len(deps_data.dev) if deps_data else 0
+    deps_count = len(deps_data.production)
+    dev_count = len(deps_data.dev)
 
     scripts_data = discover_scripts(target_path)
     scripts_count = sum(len(s.scripts) for s in scripts_data)
 
     env_data = analyze_env(target_path)
-    env_vars = env_data.expected_vars if env_data else []
+    env_vars = env_data.expected_vars
     expected = len(env_vars)
     missing = sum(1 for v in env_vars if v.status == "missing")
 
@@ -142,12 +174,14 @@ def _overview(ctx: Context) -> None:
             cwd=target_path,
             text=True,
             encoding="utf-8",
+            stderr=subprocess.DEVNULL,
         ).strip()
         porcelain = subprocess.check_output(
             ["git", "status", "--porcelain"],
             cwd=target_path,
             text=True,
             encoding="utf-8",
+            stderr=subprocess.DEVNULL,
         )
         uncommitted = len([line for line in porcelain.splitlines() if line.strip()])
         last_commit = subprocess.check_output(
@@ -155,8 +189,11 @@ def _overview(ctx: Context) -> None:
             cwd=target_path,
             text=True,
             encoding="utf-8",
+            stderr=subprocess.DEVNULL,
         ).strip()
-    except subprocess.SubprocessError:
+    # FileNotFoundError (git not installed) is an OSError, not a
+    # SubprocessError, so both are needed to keep the overview from crashing.
+    except (subprocess.SubprocessError, OSError):
         pass
 
     health_data = run_health_checks(target_path)
@@ -168,6 +205,7 @@ def _overview(ctx: Context) -> None:
                 {
                     "project": project_name,
                     "type": proj_type,
+                    "framework": project_info.framework,
                     "language": top_lang.name if top_lang else "Unknown",
                     "language_percentage": round(top_lang.percentage, 1)
                     if top_lang
@@ -193,7 +231,7 @@ def _overview(ctx: Context) -> None:
     )
 
     typer.echo(f"Project:     {project_name}")
-    typer.echo(f"Type:        {proj_type}")
+    typer.echo(f"Type:        {type_line}")
     typer.echo(f"Language:    {language_line}")
     typer.echo(f"Size:        {files} files, {lines} lines")
     typer.echo(f"Deps:        {deps_count} dependencies, {dev_count} dev")
@@ -202,7 +240,8 @@ def _overview(ctx: Context) -> None:
     typer.echo(f"Git:         {branch} branch, {uncommitted} uncommitted changes")
     typer.echo(f"Last commit: {last_commit}")
     typer.echo(
-        f"Health:      {SYMBOL_WARN if issues else SYMBOL_OK} {issues} issues found"
+        f"Health:      {_status_symbol('warn' if issues else 'ok', ctx)} "
+        f"{issues} issues found"
     )
 
 
@@ -406,7 +445,15 @@ def contributors(
     author_arg = author if author is not None else ""
     data = analyze_contributors(Path(ctx.obj.path), since=since_arg, author=author_arg)
     if ctx.obj.json_output:
-        typer.echo(json_out({"contributors": [c.__dict__ for c in data.contributors]}))
+        typer.echo(
+            json_out(
+                {
+                    "contributors": [c.__dict__ for c in data.contributors],
+                    "recent_files": [f.__dict__ for f in data.recent_files],
+                    "churn_hotspots": [f.__dict__ for f in data.churn_hotspots],
+                }
+            )
+        )
         return
 
     if ctx.obj.quiet:
@@ -416,6 +463,25 @@ def contributors(
     typer.echo(
         format_table([[c.name, f"{c.commits} commits"] for c in data.contributors])
     )
+
+    if data.recent_files:
+        typer.echo("\nRecently Active Files (last 30 days):")
+        typer.echo(
+            format_table(
+                [
+                    [f.path, f"{f.commits} commits", f"{f.authors} authors"]
+                    for f in data.recent_files
+                ]
+            )
+        )
+
+    if data.churn_hotspots:
+        typer.echo("\nChurn Hotspots:")
+        typer.echo(
+            format_table(
+                [[f.path, f"{f.commits} commits"] for f in data.churn_hotspots]
+            )
+        )
 
 
 @app.command()
@@ -430,9 +496,7 @@ def health(ctx: typer.Context) -> None:
         [c for c in data if c.status in ("fail", "warn")] if ctx.obj.quiet else data
     )
     typer.echo(
-        format_table(
-            [[_STATUS_SYMBOLS.get(c.status, SYMBOL_FAIL), c.message] for c in checks]
-        )
+        format_table([[_status_symbol(c.status, ctx.obj), c.message] for c in checks])
     )
 
 

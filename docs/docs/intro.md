@@ -4,7 +4,7 @@ sidebar_position: 1
 
 # Getting Started
 
-**meta** is a zero-runtime-dependency (other than [Typer](https://typer.tiangolo.com/)), offline-first CLI that drops into any codebase and instantly surfaces what it is, how it's structured, and what you need to know. No AI, no internet required, no configuration needed.
+**meta** is a minimal-runtime-dependency (other than [Typer](https://typer.tiangolo.com/)), offline-first CLI that drops into any codebase and instantly surfaces what it is, how it's structured, and what you need to know. No magic, no internet required, no configuration needed.
 
 ## Install
 

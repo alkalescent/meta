@@ -6,6 +6,7 @@ Runs sub-checks and collects results for repository health.
 from __future__ import annotations
 
 import datetime
+import fnmatch
 import re
 import subprocess
 from dataclasses import dataclass
@@ -18,6 +19,43 @@ class HealthCheck:
 
     status: str
     message: str
+
+
+# Named so a hit can say which rule fired, not just that something matched.
+SECRET_PATTERNS: dict[str, re.Pattern[str]] = {
+    "api-key": re.compile(
+        r"(api[_-]?key|apikey|api[_-]?secret)\s*[=:]\s*['\"][a-zA-Z0-9]{20,}['\"]",
+        re.IGNORECASE,
+    ),
+    "aws-access-key-id": re.compile(r"AKIA[0-9A-Z]{16}"),
+    "private-key": re.compile(r"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+    "database-url-credentials": re.compile(
+        r"(mongodb|postgres|mysql|redis)://[^\s]+:[^\s]+@"
+    ),
+    "credential-assignment": re.compile(
+        r"(token|secret|password)\s*[=:]\s*['\"][^'\"]{8,}['\"]", re.IGNORECASE
+    ),
+}
+
+# Test files legitimately contain fake credentials as fixtures, so scanning them
+# produces false positives (this repo's own scanner test is one).
+TEST_FILE_PATTERNS = ("test_*", "*_test.*", "*.spec.*", "*.test.*")
+TEST_DIR_NAMES = frozenset({"tests", "test", "spec", "__tests__", "fixtures"})
+
+
+def _is_test_path(relative_path: str) -> bool:
+    """Check whether a repository-relative path belongs to test material.
+
+    Args:
+        relative_path: Path relative to the repository root, slash separated.
+
+    Returns:
+        True if the path looks like a test file or lives in a test directory.
+    """
+    parts = relative_path.split("/")
+    if TEST_DIR_NAMES & set(parts[:-1]):
+        return True
+    return any(fnmatch.fnmatch(parts[-1], pat) for pat in TEST_FILE_PATTERNS)
 
 
 def run_health_checks(root: Path) -> list[HealthCheck]:
@@ -146,37 +184,30 @@ def run_health_checks(root: Path) -> list[HealthCheck]:
             check=True,
         ).stdout.splitlines()
 
-        secret_patterns = [
-            re.compile(
-                r"(api[_-]?key|apikey|api[_-]?secret)\s*[=:]\s*['\"][a-zA-Z0-9]{20,}['\"]",
-                re.IGNORECASE,
-            ),
-            re.compile(r"AKIA[0-9A-Z]{16}"),
-            re.compile(r"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----"),
-            re.compile(r"(mongodb|postgres|mysql|redis)://[^\s]+:[^\s]+@"),
-            re.compile(
-                r"(token|secret|password)\s*[=:]\s*['\"][^'\"]{8,}['\"]", re.IGNORECASE
-            ),
-        ]
-
-        secrets_found = False
+        hit: tuple[str, str] | None = None
         for file in ls_files:
+            if _is_test_path(file):
+                continue
             fpath = root / file
             if not fpath.exists() or not fpath.is_file():
                 continue
             try:
                 content = fpath.read_text(encoding="utf-8", errors="ignore")
-                for pattern in secret_patterns:
-                    if pattern.search(content):
-                        secrets_found = True
-                        break
             except Exception:
-                pass
-            if secrets_found:
+                continue
+            for name, pattern in SECRET_PATTERNS.items():
+                if pattern.search(content):
+                    hit = (file, name)
+                    break
+            if hit:
                 break
 
-        if secrets_found:
-            checks.append(HealthCheck("fail", "Secrets detected in tracked files"))
+        if hit:
+            checks.append(
+                HealthCheck(
+                    "fail", f"Secrets detected in tracked files ({hit[0]}: {hit[1]})"
+                )
+            )
         else:
             checks.append(HealthCheck("ok", "No secrets detected in tracked files"))
     except (subprocess.CalledProcessError, FileNotFoundError):
